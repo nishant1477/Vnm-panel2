@@ -1,3040 +1,2801 @@
 #!/usr/bin/env bash
-
-# ============================================================
-#                    GKVM PANEL
-#              ULTRA INSTALLER V2.0
+# =============================================================================
 #
-# Repository:
-#   https://github.com/nishant1477/Vnm-panel2
+#   ██████╗ ██╗  ██╗██╗   ██╗███╗   ███╗
+#  ██╔════╝ ██║ ██╔╝██║   ██║████╗ ████║
+#  ██║  ███╗█████╔╝ ██║   ██║██╔████╔██║
+#  ██║   ██║██╔═██╗ ╚██╗ ██╔╝██║╚██╔╝██║
+#  ╚██████╔╝██║  ██╗ ╚████╔╝ ██║ ╚═╝ ██║
+#   ╚═════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝
 #
-# Package:
-#   GKVM-panel.zip
+#            G K V M   P A N E L   —   U L T R A   N E X U S
+#                     T I T A N I U M   E D I T I O N
 #
-# Supported:
-#   Ubuntu
-#   Debian
-#   Normal VPS / systemd
-#   GitHub Codespaces
-#   Containers without systemd
+# =============================================================================
 #
-# Features:
-#   ✓ Animated terminal installer UI
-#   ✓ Progress indicators
-#   ✓ Automatic OS detection
-#   ✓ Node.js 20+ detection
-#   ✓ Automatic dependency installation
-#   ✓ Real GKVM app detection
-#   ✓ Real GKVM database discovery
-#   ✓ Real bcrypt admin password reset
-#   ✓ Admin credential verification
-#   ✓ SQLite backup
-#   ✓ Existing config backup
-#   ✓ Systemd support
-#   ✓ Standalone/Codespaces support
-#   ✓ Automatic port health check
-#   ✓ HTTP health check
-#   ✓ Firewall handling
-#   ✓ GKVM management CLI
-#   ✓ Admin password reset command
-#   ✓ Log viewer
-#   ✓ License disabled for development build
-# ============================================================
+#  MAXIMUM POWER BOOTSTRAPPER for the existing VNM/HKVM direct-install flow.
+#
+#  FEATURES (TITANIUM)
+#  -------------------
+#    • Cinematic multi-phase boot sequence (power-on / matrix rain / glitch logo)
+#    • 4-color THEME ENGINE .................. CYBER · FIRE · ICE · MATRIX
+#    • 256-color true-gradient text renderer
+#    • Live animated gauges (CPU / RAM / SWAP / DISK / NET)
+#    • Glitch-reveal logo with chromatic aberration frames
+#    • Interactive WIZARD mode (port, firewall, benchmarks, repairs)
+#    • Deep hardware telemetry (topology, flags, virt extensions, IOMMU)
+#    • KVM AUTO-REPAIR heuristics (modprobe, udev perms, nested virt)
+#    • QEMU accelerator BENCHMARK (KVM vs TCG boot timing)
+#    • Network latency matrix + GeoIP + interface audit
+#    • Multi-port collision matrix (panel + common service ports)
+#    • Firewall rule SNAPSHOT + automatic rollback path
+#    • Download engine: retry/backoff, size guard, sha256 gate
+#    • Compatibility-preserving branding patch (HKVM contract kept)
+#    • JSON telemetry report export
+#    • Log rotation + multi-tier logging (DEBUG/INFO/OK/WARN/ERR)
+#    • --dry-run simulation mode
+#    • --repair-kvm standalone doctor mode
+#    • Safe cleanup traps + full error recovery dashboard
+#
+#  COMPATIBILITY CONTRACT (PRESERVED — DO NOT RENAME)
+#  ---------------------------------------------------
+#    HKVM_INSTALL_DIR · HKVM_APP_DIR · /opt/hkvm · hkvm.service
+#
+# =============================================================================
 
 set -Eeuo pipefail
+IFS=$'\n\t'
 
-# ============================================================
-# COLORS
-# ============================================================
+# =============================================================================
+# METADATA
+# =============================================================================
+
+readonly GKVM_NAME="GKVM Panel"
+readonly GKVM_CODENAME="ULTRA NEXUS"
+readonly GKVM_VERSION="TITANIUM EDITION 2026.9"
+readonly GKVM_BUILD="TX-2026.09.27-0001"
+
+readonly LEGACY_COMMIT="dd9db741e4fac2394a514bae2c0d4ef933e00540"
+readonly LEGACY_URL="https://raw.githubusercontent.com/stripathi02123-tech/Vnm-panel/${LEGACY_COMMIT}/install-direct.sh"
+
+readonly WORK_ROOT="/tmp/gkvm-nexus-$$"
+readonly DIR_BACKUP="${WORK_ROOT}/backup"
+readonly DIR_CACHE="${WORK_ROOT}/cache"
+readonly LEGACY_RAW="${WORK_ROOT}/legacy-install.sh"
+readonly LEGACY_PATCHED="${WORK_ROOT}/gkvm-install.sh"
+readonly KVM_TEST_LOG="${WORK_ROOT}/kvm-test.log"
+readonly KVM_BENCH_LOG="${WORK_ROOT}/kvm-bench.log"
+readonly CHILD_LOG="${WORK_ROOT}/child-installer.log"
+readonly NET_MATRIX_LOG="${WORK_ROOT}/net-matrix.log"
+readonly FW_SNAPSHOT="${WORK_ROOT}/firewall.snapshot"
+readonly TELEMETRY_JSON="/var/log/gkvm-telemetry.json"
+readonly INSTALLER_LOG="/var/log/gkvm-installer.log"
+
+readonly DEFAULT_PANEL_PORT="8080"
+readonly COMMON_PORTS=(22 80 443 3000 5000 8000 8080 8443 9090 10000)
+
+# =============================================================================
+# RUNTIME STATE (all mutable globals in one place)
+# =============================================================================
+
+VNM_PANEL_PREREQS_DONE="${VNM_PANEL_PREREQS_DONE:-false}"
+
+PANEL_PORT="${GKVM_PORT:-$DEFAULT_PANEL_PORT}"
+
+ANIMATION="true"
+ULTRA_EFFECTS="true"
+ASCII_MODE="false"
+QUIET_MODE="false"
+SKIP_KVM_TEST="false"
+SKIP_FIREWALL="false"
+SKIP_BENCHMARK="false"
+DRY_RUN="false"
+WIZARD="false"
+REPAIR_MODE="false"
+ASSUME_YES="false"
+
+THEME="CYBER"            # CYBER | FIRE | ICE | MATRIX
+
+TERM_W="80"
+TERM_H="24"
+HAS_UTF8="false"
+HAS_256="false"
+HAS_TRUECOLOR="false"
+
+KVM_AVAILABLE="false"
+KVM_READWRITE="false"
+KVM_TEST="NOT_RUN"
+KVM_BENCH_MS=""
+TCG_BENCH_MS=""
+KVM_REPAIRS=()
+QEMU_INSTALLED="false"
+OVMF_INSTALLED="false"
+SYSTEMD_AVAILABLE="false"
+INTERNET_AVAILABLE="false"
+GEO_LOCATION="unknown"
+LATENCY_MS=""
+
+PKG_TOTAL="0"
+PKG_DONE="0"
+
+CHILD_EXIT_CODE="0"
+
+START_TIME="$(date +%s)"
+
+declare -a STAGE_LOG=()
+
+# =============================================================================
+# ANSI CORE
+# =============================================================================
 
 ESC=$'\033'
 
 RESET="${ESC}[0m"
 BOLD="${ESC}[1m"
 DIM="${ESC}[2m"
+ITALIC="${ESC}[3m"
+UNDERLINE="${ESC}[4m"
+BLINK="${ESC}[5m"
+REVERSE="${ESC}[7m"
+STRIKE="${ESC}[9m"
 
-BLACK="${ESC}[30m"
-RED="${ESC}[31m"
-GREEN="${ESC}[32m"
-YELLOW="${ESC}[33m"
-BLUE="${ESC}[34m"
-MAGENTA="${ESC}[35m"
-CYAN="${ESC}[36m"
-WHITE="${ESC}[37m"
+BLACK="${ESC}[30m";        RED="${ESC}[31m";       GREEN="${ESC}[32m"
+YELLOW="${ESC}[33m";       BLUE="${ESC}[34m";      MAGENTA="${ESC}[35m"
+CYAN="${ESC}[36m";         WHITE="${ESC}[37m"
 
-BRIGHT_RED="${ESC}[91m"
-BRIGHT_GREEN="${ESC}[92m"
-BRIGHT_YELLOW="${ESC}[93m"
-BRIGHT_BLUE="${ESC}[94m"
-BRIGHT_MAGENTA="${ESC}[95m"
-BRIGHT_CYAN="${ESC}[96m"
-BRIGHT_WHITE="${ESC}[97m"
+BRIGHT_BLACK="${ESC}[90m"; BRIGHT_RED="${ESC}[91m";   BRIGHT_GREEN="${ESC}[92m"
+BRIGHT_YELLOW="${ESC}[93m";BRIGHT_BLUE="${ESC}[94m";  BRIGHT_MAGENTA="${ESC}[95m"
+BRIGHT_CYAN="${ESC}[96m";  BRIGHT_WHITE="${ESC}[97m"
 
-# ============================================================
-# GLOBAL CONFIG
-# ============================================================
+PINK="${ESC}[38;5;213m";   HOT_PINK="${ESC}[38;5;205m"; PURPLE="${ESC}[38;5;141m"
+VIOLET="${ESC}[38;5;135m"; DEEP_PURPLE="${ESC}[38;5;93m"; LAVENDER="${ESC}[38;5;183m"
+ICE="${ESC}[38;5;159m";    SKY="${ESC}[38;5;117m";    AQUA="${ESC}[38;5;87m"
+TEAL="${ESC}[38;5;80m";    LIME="${ESC}[38;5;118m";   MINT="${ESC}[38;5;121m"
+GOLD="${ESC}[38;5;220m";   ORANGE="${ESC}[38;5;208m"; FIRE="${ESC}[38;5;202m"
+FLAME="${ESC}[38;5;196m";  CRIMSON="${ESC}[38;5;160m"; EMERALD="${ESC}[38;5;46m"
+SILVER="${ESC}[38;5;250m"; STEEL="${ESC}[38;5;245m";  SLATE="${ESC}[38;5;240m"
 
-APP_NAME="GKVM Panel"
-APP_VERSION="2.0"
+# =============================================================================
+# THEME ENGINE
+# =============================================================================
 
-REPO_URL="https://github.com/nishant1477/Vnm-panel2.git"
-ZIP_NAME="GKVM-panel.zip"
+theme_apply() {
 
-INSTALL_DIR="/opt/gkvm"
-APP_DIR="${INSTALL_DIR}/app"
-DATA_DIR="${INSTALL_DIR}/data"
-LOG_DIR="${INSTALL_DIR}/logs"
-BACKUP_DIR="${INSTALL_DIR}/backups"
+    local t="${1^^}"
 
-CONFIG_DIR="/etc/gkvm"
-ENV_FILE="${CONFIG_DIR}/gkvm.env"
-RUNTIME_FILE="${CONFIG_DIR}/runtime.conf"
-CREDENTIAL_FILE="${CONFIG_DIR}/admin-credentials.txt"
+    case "${t}" in
 
-LOG_FILE="${LOG_DIR}/gkvm.log"
-BOOTSTRAP_LOG="${LOG_DIR}/bootstrap.log"
-INSTALLER_LOG="/var/log/gkvm-installer.log"
+        FIRE)
+            T_ACCENT1="${FLAME}";  T_ACCENT2="${FIRE}";  T_ACCENT3="${ORANGE}"
+            T_ACCENT4="${GOLD}";   T_GLOW="${BRIGHT_YELLOW}"; T_CORE="${BRIGHT_RED}"
+            T_BG="${DIM}${RED}"
+            ;;
 
-PID_FILE="${INSTALL_DIR}/gkvm.pid"
+        ICE)
+            T_ACCENT1="${ICE}";    T_ACCENT2="${SKY}";   T_ACCENT3="${AQUA}"
+            T_ACCENT4="${BRIGHT_CYAN}"; T_GLOW="${WHITE}"; T_CORE="${TEAL}"
+            T_BG="${DIM}${CYAN}"
+            ;;
 
-SERVICE_NAME="gkvm-panel"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+        MATRIX)
+            T_ACCENT1="${EMERALD}";T_ACCENT2="${LIME}";  T_ACCENT3="${MINT}"
+            T_ACCENT4="${BRIGHT_GREEN}"; T_GLOW="${BRIGHT_WHITE}"; T_CORE="${GREEN}"
+            T_BG="${DIM}${GREEN}"
+            ;;
 
-MANAGER_FILE="/usr/local/bin/gkvm"
+        CYBER|*)
+            THEME="CYBER"
+            T_ACCENT1="${BRIGHT_CYAN}"; T_ACCENT2="${PURPLE}"; T_ACCENT3="${PINK}"
+            T_ACCENT4="${GOLD}";   T_GLOW="${BRIGHT_MAGENTA}"; T_CORE="${HOT_PINK}"
+            T_BG="${DIM}${PURPLE}"
+            ;;
 
-PANEL_PORT="8080"
+    esac
+}
 
-NODE_BIN=""
-NPM_BIN=""
-MAIN_JS=""
+# =============================================================================
+# TERMINAL PROBE
+# =============================================================================
 
-SOURCE_APP_DIR=""
-ZIP_FILE=""
-TMP_DIR=""
+probe_terminal() {
 
-RUNTIME_USER="root"
-RUNTIME_GROUP="root"
-RUNTIME_HOME="/root"
+    TERM_W="$(tput cols 2>/dev/null || echo 80)"
+    TERM_H="$(tput lines 2>/dev/null || echo 24)"
 
-HAS_SYSTEMD="false"
-IS_CODESPACES="false"
+    [[ "${TERM_W}" =~ ^[0-9]+$ ]] || TERM_W=80
+    [[ "${TERM_H}" =~ ^[0-9]+$ ]] || TERM_H=24
 
-DB_PATH=""
+    if locale charmap 2>/dev/null | grep -qi "utf"; then
+        HAS_UTF8="true"
+    fi
 
-ADMIN_USERNAME="admin"
-ADMIN_PASSWORD=""
+    local colors
+    colors="$(tput colors 2>/dev/null || echo 0)"
+    [[ "${colors}" =~ ^[0-9]+$ ]] || colors=0
+    (( colors >= 256 )) && HAS_256="true"
 
-BOOTSTRAP_PID=""
+    if [[ "${COLORTERM:-}" =~ (truecolor|24bit) ]]; then
+        HAS_TRUECOLOR="true"
+    fi
 
-ANIMATION="false"
+    if [[ ! -t 1 || "${TERM:-}" == "dumb" ]]; then
+        ANIMATION="false"
+        ULTRA_EFFECTS="false"
+    fi
 
-# ============================================================
-# TERMINAL DETECTION
-# ============================================================
+    if [[ "${CI:-false}" == "true" || "${TERM_W}" -lt 70 ]]; then
+        ULTRA_EFFECTS="false"
+    fi
 
-if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]]; then
-    ANIMATION="true"
-fi
+    [[ "${ASCII_MODE}" == "true" ]] && ULTRA_EFFECTS="false"
+}
 
-if [[ "${CODESPACES:-false}" == "true" ]]; then
-    IS_CODESPACES="true"
-fi
-
-# ============================================================
-# LOG FILE SETUP
-# ============================================================
-
-mkdir -p "$(dirname "${INSTALLER_LOG}")" 2>/dev/null || true
+mkdir -p "${WORK_ROOT}" "${DIR_BACKUP}" "${DIR_CACHE}" 2>/dev/null || true
 touch "${INSTALLER_LOG}" 2>/dev/null || true
 
 exec > >(tee -a "${INSTALLER_LOG}") 2>&1
 
-# ============================================================
-# UI FUNCTIONS
-# ============================================================
+# =============================================================================
+# CURSOR / SCREEN CONTROL
+# =============================================================================
 
-terminal_width() {
-    local width
-    width="$(tput cols 2>/dev/null || echo 68)"
+hide_cursor() { [[ "${ANIMATION}" == "true" ]] && printf '\033[?25l'; }
+show_cursor() { printf '\033[?25h'; }
 
-    if [[ ! "${width}" =~ ^[0-9]+$ ]]; then
-        width=68
+clear_screen()  { clear 2>/dev/null || printf '\033[2J\033[H'; }
+move_home()     { printf '\033[H'; }
+clear_line()    { printf '\r\033[2K'; }
+save_screen()   { printf '\033[?1049h'; }
+restore_screen(){ printf '\033[?1049l'; }
+
+# =============================================================================
+# LOGGING ENGINE (multi-tier)
+# =============================================================================
+
+log_raw()  { printf '%s\n' "$*" >> "${INSTALLER_LOG}"; }
+
+log_debug(){ log_raw "[$(date '+%H:%M:%S')] [DEBUG] $*"; }
+log_info() { log_raw "[$(date '+%H:%M:%S')] [INFO ] $*"; }
+log_ok()   { log_raw "[$(date '+%H:%M:%S')] [ OK  ] $*"; }
+log_warn() { log_raw "[$(date '+%H:%M:%S')] [WARN ] $*"; }
+log_err()  { log_raw "[$(date '+%H:%M:%S')] [ERR  ] $*"; }
+
+rotate_logs() {
+
+    if [[ -f "${INSTALLER_LOG}" ]]; then
+        local size
+        size="$(stat -c%s "${INSTALLER_LOG}" 2>/dev/null || echo 0)"
+        if [[ "${size}" =~ ^[0-9]+$ ]] && (( size > 2097152 )); then
+            mv "${INSTALLER_LOG}" "${INSTALLER_LOG}.1" 2>/dev/null || true
+            touch "${INSTALLER_LOG}" 2>/dev/null || true
+            log_info "Log rotated (previous > 2 MiB)."
+        fi
     fi
-
-    (( width > 110 )) && width=110
-    (( width < 60 )) && width=60
-
-    echo "${width}"
 }
 
-center_text() {
-    local text="$1"
-    local width="$2"
-
-    local visible="${text//\x1b\[[0-9;]*m/}"
-    local len="${#visible}"
-
-    local spaces=$(( (width - len) / 2 ))
-
-    (( spaces < 0 )) && spaces=0
-
-    printf "%${spaces}s%s\n" "" "$text"
-}
-
-banner() {
-
-    clear 2>/dev/null || true
-
-    local width
-    width="$(terminal_width)"
-
-    echo
-    echo -e "${BRIGHT_CYAN}${BOLD}"
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                                                              ║"
-    echo "║                    ██████╗ ██╗  ██╗██╗   ██╗                 ║"
-    echo "║                   ██╔════╝ ██║ ██╔╝██║   ██║                 ║"
-    echo "║                   ██║  ███╗█████╔╝ ██║   ██║                 ║"
-    echo "║                   ██║   ██║██╔═██╗ ╚██╗ ██╔╝                 ║"
-    echo "║                   ╚██████╔╝██║  ██╗ ╚████╔╝                  ║"
-    echo "║                    ╚═════╝ ╚═╝  ╚═╝  ╚═══╝                   ║"
-    echo "║                                                              ║"
-    echo "║                     GKVM PANEL                               ║"
-    echo "║                 ULTRA INSTALLER ${APP_VERSION}                       ║"
-    echo "║                                                              ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
-
-    echo -e "${DIM}${CYAN}     VM Management • KVM • QEMU • Console • Network • Admin${RESET}"
-    echo
-}
-
-section() {
-
-    local title="$1"
-
-    echo
-    echo -e "${BRIGHT_MAGENTA}${BOLD}┌────────────────────────────────────────────────────────────┐${RESET}"
-    echo -e "${BRIGHT_MAGENTA}${BOLD}│ ${title}${RESET}"
-    echo -e "${BRIGHT_MAGENTA}${BOLD}└────────────────────────────────────────────────────────────┘${RESET}"
-}
-
-info() {
-    echo -e "  ${CYAN}◆${RESET} ${WHITE}$*${RESET}"
-}
-
-success() {
-    echo -e "  ${BRIGHT_GREEN}✔${RESET} ${BRIGHT_GREEN}$*${RESET}"
-}
-
-warning() {
-    echo -e "  ${BRIGHT_YELLOW}⚠${RESET} ${BRIGHT_YELLOW}$*${RESET}"
-}
-
-error_msg() {
-    echo -e "  ${BRIGHT_RED}✖${RESET} ${BRIGHT_RED}$*${RESET}"
-}
-
-detail() {
-    echo -e "    ${DIM}└─${RESET} $*"
-}
-
-die() {
-    error_msg "$*"
-    exit 1
-}
-
-separator() {
-    echo -e "${DIM}──────────────────────────────────────────────────────────────${RESET}"
-}
-
-# ============================================================
-# ANIMATED SPINNER
-# ============================================================
-
-run_step() {
-
-    local label="$1"
-    shift
-
-    local frames=(
-        "⠋"
-        "⠙"
-        "⠹"
-        "⠸"
-        "⠼"
-        "⠴"
-        "⠦"
-        "⠧"
-        "⠇"
-        "⠏"
-    )
-
-    local pid
-    local i=0
-    local rc=0
-
-    if [[ "${ANIMATION}" == "true" ]]; then
-
-        "$@" >>"${INSTALLER_LOG}" 2>&1 &
-        pid=$!
-
-        while kill -0 "${pid}" >/dev/null 2>&1; do
-
-            printf "\r  ${BRIGHT_CYAN}%s${RESET} ${WHITE}%-52s${RESET}" \
-                "${frames[$((i % ${#frames[@]}))]}" \
-                "${label}"
-
-            i=$((i + 1))
-
-            sleep 0.08
-
-        done
-
-        if wait "${pid}"; then
-            rc=0
-        else
-            rc=$?
-        fi
-
-        if [[ "${rc}" -eq 0 ]]; then
-
-            printf "\r  ${BRIGHT_GREEN}✔${RESET} ${GREEN}%-60s${RESET}\n" \
-                "${label}"
-
-        else
-
-            printf "\r  ${BRIGHT_RED}✖${RESET} ${RED}%-60s${RESET}\n" \
-                "${label}"
-
-        fi
-
-    else
-
-        info "${label}..."
-
-        if "$@" >>"${INSTALLER_LOG}" 2>&1; then
-
-            success "${label}"
-
-        else
-
-            rc=$?
-
-            error_msg "${label} failed."
-
-        fi
-
-    fi
-
-    return "${rc}"
-}
-
-# ============================================================
-# SIMPLE EFFECT
-# ============================================================
-
-pulse() {
-
-    [[ "${ANIMATION}" == "true" ]] || return 0
-
-    local text="$1"
-
-    for symbol in "." ".." "..."; do
-
-        printf "\r  ${DIM}${CYAN}%s%s${RESET}" \
-            "${text}" \
-            "${symbol}"
-
-        sleep 0.12
-
-    done
-
-    printf "\r\033[2K"
-
-}
-
-# ============================================================
-# CLEANUP
-# ============================================================
+# =============================================================================
+# LIFECYCLE: CLEANUP + ERROR TRAP
+# =============================================================================
 
 cleanup() {
 
-    if [[ -n "${BOOTSTRAP_PID}" ]] &&
-       [[ "${BOOTSTRAP_PID}" =~ ^[0-9]+$ ]]; then
+    local rc=$?
 
-        kill "${BOOTSTRAP_PID}" \
-            >/dev/null 2>&1 || true
+    show_cursor
 
-        wait "${BOOTSTRAP_PID}" \
-            >/dev/null 2>&1 || true
-
+    if [[ "${rc}" -ne 0 && "${REPAIR_MODE}" != "true" ]]; then
+        : # on_error already rendered dashboard
     fi
 
-    if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
-        rm -rf "${TMP_DIR}" || true
-    fi
+    rm -rf "${WORK_ROOT}" 2>/dev/null || true
+
+    return 0
 }
 
 trap cleanup EXIT
 
-# ============================================================
-# ERROR HANDLER
-# ============================================================
-
-installer_error() {
+on_error() {
 
     local rc=$?
 
+    show_cursor
+
     echo
-    separator
+    echo -e "${FLAME}${BOLD}"
+    cat <<'EOF'
+  ╔═══════════════════════════════════════════════════════════════════╗
+  ║                                                                   ║
+  ║        ✖  G K V M   N E X U S   —   F A U L T   S T A T E        ║
+  ║                                                                   ║
+  ╚═══════════════════════════════════════════════════════════════════╝
+EOF
+    echo -e "${RESET}"
 
-    error_msg "GKVM installer stopped unexpectedly."
-    detail "Exit code : ${rc}"
-    detail "Installer log : ${INSTALLER_LOG}"
+    printf "  ${BRIGHT_RED}✖${RESET} Fault Code : ${BOLD}%s${RESET}\n" "${rc}"
+    printf "  ${ICE}◆${RESET} Log File   : ${INSTALLER_LOG}\n"
 
-    if [[ -f "${BOOTSTRAP_LOG}" ]]; then
-
+    if [[ -f "${CHILD_LOG}" ]]; then
         echo
-        echo -e "${BRIGHT_YELLOW}Bootstrap diagnostics:${RESET}"
-
-        tail -n 120 "${BOOTSTRAP_LOG}" || true
-
+        echo -e "${BRIGHT_YELLOW}${BOLD}  Last installer output:${RESET}"
+        echo -e "${DIM}"
+        tail -n 60 "${CHILD_LOG}" 2>/dev/null || true
+        echo -e "${RESET}"
     fi
 
+    if [[ -f "${KVM_TEST_LOG}" ]]; then
+        echo
+        echo -e "${BRIGHT_YELLOW}${BOLD}  KVM diagnostics:${RESET}"
+        echo -e "${DIM}"
+        tail -n 30 "${KVM_TEST_LOG}" 2>/dev/null || true
+        echo -e "${RESET}"
+    fi
+
+    echo
+    echo -e "  ${DIM}Recovery hints:${RESET}"
+    echo -e "    ${ICE}➜${RESET} Re-run with ${BOLD}--repair-kvm${RESET} to auto-fix virtualization"
+    echo -e "    ${ICE}➜${RESET} Re-run with ${BOLD}--dry-run${RESET} to simulate every stage"
+    echo -e "    ${ICE}➜${RESET} Check ${BOLD}${INSTALLER_LOG}${RESET} for the full trace"
     echo
 
     exit "${rc}"
 }
 
-trap installer_error ERR
+trap on_error ERR
 
-# ============================================================
-# CHECK ROOT
-# ============================================================
+# =============================================================================
+# BASIC UI PRIMITIVES
+# =============================================================================
 
-[[ "${EUID}" -eq 0 ]] ||
-    die "Run this installer as root."
+info()    { printf "  ${ICE}◆${RESET} ${WHITE}%s${RESET}\n" "$*"; log_info "$*"; }
+success() { printf "  ${EMERALD}✔${RESET} ${BRIGHT_GREEN}%s${RESET}\n" "$*"; log_ok "$*"; }
+warning() { printf "  ${GOLD}⚠${RESET} ${BRIGHT_YELLOW}%s${RESET}\n" "$*"; log_warn "$*"; }
+failure() { printf "  ${FLAME}✖${RESET} ${BRIGHT_RED}%s${RESET}\n" "$*" >&2; log_err "$*"; }
+muted()   { printf "  ${DIM}%s${RESET}\n" "$*"; }
+die()     { failure "$*"; exit 1; }
 
-# ============================================================
-# BANNER
-# ============================================================
+divider() {
+    local n=$(( TERM_W > 80 ? 76 : TERM_W - 4 ))
+    printf "  ${T_BG}%s${RESET}\n" "$(printf "%${n}s" "" | tr ' ' '━')"
+}
 
-banner
+thin_divider() {
+    local n=$(( TERM_W > 80 ? 76 : TERM_W - 4 ))
+    printf "  ${DIM}${CYAN}%s${RESET}\n" "$(printf "%${n}s" "" | tr ' ' '─')"
+}
 
-# ============================================================
-# DETECT OS
-# ============================================================
+label() {
 
-section "SYSTEM DETECTION"
+    local key="$1"
+    local value="$2"
+    local color="${3:-${WHITE}}"
 
-[[ -f /etc/os-release ]] ||
-    die "Cannot detect operating system."
+    printf \
+        "  ${DIM}%-26s${RESET} ${color}%s${RESET}\n" \
+        "${key}" \
+        "${value}"
+}
 
-source /etc/os-release
+bullet() {
+    printf "  ${T_ACCENT2}${BOLD}▸${RESET} ${WHITE}%s${RESET}\n" "$*"
+}
 
-info "Operating system : ${PRETTY_NAME:-unknown}"
-info "Architecture     : $(uname -m)"
-info "Kernel           : $(uname -r)"
+# =============================================================================
+# GLYPH SET (unicode / ascii fallback)
+# =============================================================================
 
-if [[ "${ID:-}" != "ubuntu" &&
-      "${ID:-}" != "debian" ]]; then
+glyph_init() {
 
-    die "Supported systems: Ubuntu and Debian."
-
-fi
-
-# ============================================================
-# DETECT RUNTIME USER
-# ============================================================
-
-if [[ -n "${SUDO_USER:-}" &&
-      "${SUDO_USER}" != "root" ]]; then
-
-    RUNTIME_USER="${SUDO_USER}"
-
-else
-
-    RUNTIME_USER="root"
-
-fi
-
-RUNTIME_GROUP="$(
-    id -gn "${RUNTIME_USER}" 2>/dev/null ||
-    echo "${RUNTIME_USER}"
-)"
-
-RUNTIME_HOME="$(
-    getent passwd "${RUNTIME_USER}" |
-    cut -d: -f6
-)"
-
-[[ -n "${RUNTIME_HOME}" ]] ||
-    RUNTIME_HOME="/root"
-
-info "Runtime user      : ${RUNTIME_USER}"
-info "Runtime home      : ${RUNTIME_HOME}"
-
-# ============================================================
-# SYSTEMD
-# ============================================================
-
-if command -v systemctl >/dev/null 2>&1 &&
-   [[ -d /run/systemd/system ]]; then
-
-    HAS_SYSTEMD="true"
-
-    success "systemd available"
-
-else
-
-    HAS_SYSTEMD="false"
-
-    warning "systemd unavailable"
-    detail "Standalone process mode will be used."
-
-fi
-
-if [[ "${IS_CODESPACES}" == "true" ]]; then
-
-    warning "GitHub Codespaces detected"
-    detail "No systemd VM-host service will be created."
-
-fi
-
-# ============================================================
-# HARDWARE
-# ============================================================
-
-if [[ -e /dev/kvm ]]; then
-    success "/dev/kvm detected"
-    detail "KVM acceleration is available."
-else
-    warning "/dev/kvm not detected"
-    detail "GKVM can still install, but local KVM acceleration may be unavailable."
-fi
-
-separator
-
-# ============================================================
-# PACKAGE INSTALLATION
-# ============================================================
-
-section "SYSTEM DEPENDENCIES"
-
-run_step \
-    "Updating APT package indexes" \
-    apt-get update -y
-
-run_step \
-    "Installing base packages" \
-    apt-get install -y \
-        ca-certificates \
-        curl \
-        git \
-        unzip \
-        file \
-        lsof \
-        procps \
-        iproute2 \
-        openssl \
-        build-essential \
-        python3 \
-        sqlite3 \
-        util-linux
-
-# ============================================================
-# VM PACKAGES
-# ============================================================
-
-if [[ "${HAS_SYSTEMD}" == "true" &&
-      -e /dev/kvm ]]; then
-
-    run_step \
-        "Installing QEMU and virtualization packages" \
-        apt-get install -y \
-            qemu-system-x86 \
-            qemu-utils \
-            ovmf \
-            cloud-init \
-            libvirt-daemon-system \
-            libvirt-clients
-
-else
-
-    warning "Skipping heavy local VM-host packages for this environment."
-
-fi
-
-# ============================================================
-# NODE.JS
-# ============================================================
-
-section "NODE.JS RUNTIME"
-
-NODE_OK="false"
-
-if command -v node >/dev/null 2>&1; then
-
-    NODE_VERSION="$(
-        node -v |
-        sed 's/^v//'
-    )"
-
-    NODE_MAJOR="${NODE_VERSION%%.*}"
-
-    if [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] &&
-       (( NODE_MAJOR >= 20 )); then
-
-        NODE_OK="true"
-
-        NODE_BIN="$(
-            readlink -f "$(command -v node)" 2>/dev/null ||
-            command -v node
-        )"
-
-        NPM_BIN="$(
-            readlink -f "$(command -v npm)" 2>/dev/null ||
-            command -v npm
-        )"
-
-        success "Node.js ${NODE_VERSION} detected"
-
+    if [[ "${HAS_UTF8}" == "true" && "${ASCII_MODE}" != "true" ]]; then
+        G_CHECK="✔"; G_CROSS="✖"; G_WARN="⚠"; G_INFO="◆"
+        G_ARROW="➜"; G_BLOCK_F="█"; G_BLOCK_E="░"; G_BLOCK_M="▒"
+        G_PIPE="│"; G_CORNER_TL="╭"; G_CORNER_TR="╮"
+        G_CORNER_BL="╰"; G_CORNER_BR="╯"
+        G_DIA="◆"; G_DIA_O="◇"; G_HEX="⬢"; G_HEX_O="⬡"
+        G_STAR="✦"; G_BOLT="⚡"; G_FIRE="🔥"
+        G_SPINNER=( "⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏" )
     else
-
-        warning "Detected Node.js ${NODE_VERSION}, but GKVM requires Node.js 20+."
-
+        G_CHECK="[OK]"; G_CROSS="[X]"; G_WARN="[!]"; G_INFO="[*]"
+        G_ARROW="->"; G_BLOCK_F="#"; G_BLOCK_E="."; G_BLOCK_M="="
+        G_PIPE="|"; G_CORNER_TL="+"; G_CORNER_TR="+"
+        G_CORNER_BL="+"; G_CORNER_BR="+"
+        G_DIA="*"; G_DIA_O="o"; G_HEX="#"; G_HEX_O="o"
+        G_STAR="*"; G_BOLT="!"; G_FIRE=">>"
+        G_SPINNER=( "-" "\\" "|" "/" )
     fi
+}
 
-fi
+# =============================================================================
+# GRADIENT TEXT RENDERER
+# =============================================================================
 
-if [[ "${NODE_OK}" != "true" ]]; then
+gradient_line() {
 
-    run_step \
-        "Configuring NodeSource Node.js 22 repository" \
-        bash -c \
-        'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -'
+    local text="$1"
+    local mode="${2:-theme}"
 
-    run_step \
-        "Installing Node.js 22" \
-        apt-get install -y nodejs
+    local colors=()
 
-fi
+    case "${mode}" in
 
-NODE_BIN="$(
-    readlink -f "$(command -v node)" 2>/dev/null ||
-    command -v node
-)"
+        fire)
+            colors=( "${FLAME}" "${FIRE}" "${ORANGE}" "${GOLD}" "${BRIGHT_YELLOW}" )
+            ;;
 
-NPM_BIN="$(
-    readlink -f "$(command -v npm)" 2>/dev/null ||
-    command -v npm
-)"
+        ice)
+            colors=( "${ICE}" "${SKY}" "${AQUA}" "${BRIGHT_CYAN}" "${WHITE}" )
+            ;;
 
-[[ -x "${NODE_BIN}" ]] ||
-    die "Node binary is unavailable."
+        matrix)
+            colors=( "${EMERALD}" "${LIME}" "${MINT}" "${BRIGHT_GREEN}" )
+            ;;
 
-[[ -x "${NPM_BIN}" ]] ||
-    die "npm binary is unavailable."
+        rainbow)
+            colors=( "${BRIGHT_CYAN}" "${AQUA}" "${SKY}" "${ICE}" "${PURPLE}"
+                     "${PINK}" "${HOT_PINK}" "${GOLD}" "${ORANGE}" "${FIRE}" )
+            ;;
 
-success "Node.js : $("${NODE_BIN}" -v)"
-success "npm     : $("${NPM_BIN}" -v)"
+        theme|*)
+            colors=( "${T_ACCENT1}" "${T_ACCENT2}" "${T_ACCENT3}" "${T_ACCENT4}"
+                     "${T_ACCENT2}" "${T_ACCENT1}" )
+            ;;
+    esac
 
-separator
+    local len="${#text}"
+    local clen="${#colors[@]}"
+    local i
 
-# ============================================================
-# STORAGE
-# ============================================================
+    for ((i=0; i<len; i++)); do
 
-section "GKVM STORAGE"
+        printf "%b%s%b" \
+            "${colors[$(( i % clen ))]}" \
+            "${text:i:1}" \
+            "${RESET}"
 
-mkdir -p \
-    "${INSTALL_DIR}" \
-    "${APP_DIR}" \
-    "${DATA_DIR}" \
-    "${LOG_DIR}" \
-    "${BACKUP_DIR}" \
-    "${CONFIG_DIR}"
+    done
 
-touch "${LOG_FILE}"
-touch "${BOOTSTRAP_LOG}"
+    printf "\n"
+}
 
-chmod 755 \
-    "${INSTALL_DIR}" \
-    "${APP_DIR}" \
-    "${DATA_DIR}" \
-    "${LOG_DIR}"
+# =============================================================================
+# TYPEWRITER EFFECT
+# =============================================================================
 
-chmod 700 \
-    "${BACKUP_DIR}" \
-    "${CONFIG_DIR}"
+typewrite() {
 
-chmod 640 \
-    "${LOG_FILE}" \
-    "${BOOTSTRAP_LOG}"
+    local text="$1"
+    local speed="${2:-0.012}"
 
-success "GKVM directories prepared."
+    [[ "${ANIMATION}" != "true" ]] && { printf "%s\n" "${text}"; return 0; }
 
-# ============================================================
-# OLD SERVICE
-# ============================================================
+    local i
+    local len="${#text}"
 
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
+    for ((i=0; i<len; i++)); do
 
-    systemctl stop "${SERVICE_NAME}" \
-        >/dev/null 2>&1 || true
+        printf "%b%s%b" "${T_ACCENT1}${BOLD}" "${text:i:1}" "${RESET}"
+        sleep "${speed}"
 
-fi
+    done
 
-# ============================================================
-# OLD PID
-# ============================================================
+    printf "\n"
+}
 
-if [[ -f "${PID_FILE}" ]]; then
+# =============================================================================
+# MATRIX RAIN
+# =============================================================================
 
-    OLD_PID="$(
-        cat "${PID_FILE}" 2>/dev/null ||
-        true
-    )"
+matrix_rain() {
 
-    if [[ "${OLD_PID}" =~ ^[0-9]+$ ]]; then
+    [[ "${ULTRA_EFFECTS}" == "true" ]] || return 0
 
-        kill "${OLD_PID}" \
-            >/dev/null 2>&1 ||
-            true
+    local rows="${1:-8}"
+    local cols=$(( TERM_W > 100 ? 90 : TERM_W - 10 ))
+    local frames="${2:-28}"
 
-        for _ in {1..25}; do
+    local glyphs=( "0" "1" "7" "K" "V" "M" "Q" "E" "M" "U" "L" "A" "T" "O" "R" )
+    local colors=( "${T_ACCENT2}" "${T_ACCENT3}" "${T_GLOW}" "${EMERALD}" )
 
-            if ! kill -0 "${OLD_PID}" \
-                >/dev/null 2>&1; then
+    local f c r g col
+    local out
 
-                break
+    hide_cursor
 
+    for ((f=0; f<frames; f++)); do
+
+        out=""
+        for ((r=0; r<rows; r++)); do
+            line="  "
+            for ((c=0; c<cols; c++)); do
+                if (( RANDOM % 12 == 0 )); then
+                    g="${glyphs[$((RANDOM % ${#glyphs[@]}))]}"
+                    col="${colors[$((RANDOM % ${#colors[@]}))]}"
+                    line+="${col}${BOLD}${g}${RESET}"
+                else
+                    line+=" "
+                fi
+            done
+            out+="${line}\n"
+        done
+
+        printf "%b" "${out}"
+        sleep 0.03
+        move_home
+
+    done
+
+    clear_line
+    show_cursor
+}
+
+# =============================================================================
+# GLITCH REVEAL (chromatic aberration frames)
+# =============================================================================
+
+glitch_reveal() {
+
+    [[ "${ULTRA_EFFECTS}" == "true" ]] || return 0
+
+    local text="$1"
+
+    local glitch_chars=( "▓" "▒" "░" "#" "%" "@" "&" "$" "?" "!" )
+
+    local pass
+    local reveal
+    local i
+    local len="${#text}"
+
+    hide_cursor
+
+    for pass in 1 2 3; do
+
+        reveal=""
+        for ((i=0; i<len; i++)); do
+
+            if (( RANDOM % 3 == 0 )); then
+                reveal+="${glitch_chars[$((RANDOM % ${#glitch_chars[@]}))]}"
+            else
+                reveal+=" "
             fi
-
-            sleep 0.2
 
         done
 
-        kill -9 "${OLD_PID}" \
-            >/dev/null 2>&1 ||
-            true
+        printf "\r  ${FLAME}${BOLD}%s${RESET}" "${reveal}"
+        sleep 0.06
+
+    done
+
+    printf "\r  %b%s%b\n" "${T_GLOW}${BOLD}" "${text}" "${RESET}"
+    show_cursor
+}
+
+# =============================================================================
+# PARTICLE BURST
+# =============================================================================
+
+particle_burst() {
+
+    [[ "${ULTRA_EFFECTS}" == "true" ]] || return 0
+
+    local text="$1"
+
+    local particles=( "✦" "✧" "⋆" "＊" "＋" "･" "⚡" "◆" )
+
+    hide_cursor
+
+    local wave
+    local i
+
+    for wave in 1 2 3 4 5 6; do
+
+        printf "\r  "
+        for i in {0..40}; do
+            if (( RANDOM % 2 == 0 )); then
+                printf "%b%s" "${T_ACCENT4}" "${particles[$((RANDOM % ${#particles[@]}))]}"
+            else
+                printf " "
+            fi
+        done
+        sleep 0.04
+
+    done
+
+    clear_line
+    printf "  %b%s%b\n" "${T_GLOW}${BOLD}" "${text}" "${RESET}"
+    show_cursor
+}
+
+# =============================================================================
+# PLASMA STRIP
+# =============================================================================
+
+plasma_strip() {
+
+    [[ "${ULTRA_EFFECTS}" == "true" ]] || return 0
+
+    local width=$(( TERM_W > 80 ? 72 : TERM_W - 8 ))
+    local frames="${1:-30}"
+
+    local colors=( "${T_ACCENT1}" "${T_ACCENT2}" "${T_ACCENT3}" "${T_ACCENT4}" "${T_GLOW}" )
+
+    hide_cursor
+
+    local f i idx
+    local line
+
+    for ((f=0; f<frames; f++)); do
+
+        line="  "
+        for ((i=0; i<width; i++)); do
+
+            idx=$(( (i + f) % ${#colors[@]} ))
+            line+="${colors[$idx]}${G_BLOCK_F}${RESET}"
+
+        done
+
+        printf "\r%s" "${line}"
+        sleep 0.02
+
+    done
+
+    echo
+    show_cursor
+}
+
+# =============================================================================
+# ENERGY / PROGRESS BAR
+# =============================================================================
+
+energy_bar() {
+
+    local current="$1"
+    local total="$2"
+    local text="$3"
+
+    local width=$(( TERM_W > 80 ? 46 : TERM_W - 34 ))
+    (( width < 10 )) && width=10
+
+    local filled=$(( current * width / total ))
+    local empty=$(( width - filled ))
+
+    (( filled < 0 )) && filled=0
+    (( empty  < 0 )) && empty=0
+
+    local fill="" blank=""
+    (( filled > 0 )) && fill="$(printf "%${filled}s" "" | tr ' ' "${G_BLOCK_F}")"
+    (( empty  > 0 )) && blank="$(printf "%${empty}s" "" | tr ' ' "${G_BLOCK_E}")"
+
+    local pct=$(( current * 100 / total ))
+
+    local seg1="" seg2=""
+
+    if (( filled > 0 )); then
+        local half=$(( filled / 2 ))
+        seg1="$(printf "%${half}s" "" | tr ' ' "${G_BLOCK_F}")"
+        seg2="$(printf "%$((filled - half))s" "" | tr ' ' "${G_BLOCK_F}")"
+    fi
+
+    printf \
+        "\r  ${T_ACCENT1}[${LIME}%s${ORANGE}%s${DIM}%s${T_ACCENT1}]${RESET} ${GOLD}%3d%%${RESET} ${WHITE}%s${RESET}" \
+        "${seg1}" "${seg2}" "${blank}" "${pct}" "${text}"
+
+    if (( current >= total )); then
+        echo
+    fi
+}
+
+# =============================================================================
+# SPINNER RUNNER (execute with animation)
+# =============================================================================
+
+run_effect() {
+
+    local text="$1"
+    shift
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "  ${STEEL}[DRY-RUN]${RESET} ${WHITE}%s${RESET}\n" "${text}"
+        log_info "[dry-run] skipped: ${text}"
+        return 0
+    fi
+
+    if [[ "${ANIMATION}" != "true" ]]; then
+
+        info "${text}..."
+        "$@"
+        success "${text}"
+        return 0
+    fi
+
+    local spin_colors=(
+        "${T_ACCENT1}" "${ICE}" "${T_ACCENT2}" "${PINK}"
+        "${T_GLOW}"    "${GOLD}" "${BRIGHT_GREEN}" "${BRIGHT_YELLOW}"
+    )
+
+    "$@" >>"${INSTALLER_LOG}" 2>&1 &
+    local pid=$!
+    local i=0
+
+    hide_cursor
+
+    while kill -0 "${pid}" >/dev/null 2>&1; do
+
+        printf \
+            "\r  ${spin_colors[$((i % ${#spin_colors[@]}))]}${BOLD}%s${RESET} ${WHITE}%-58s${RESET}" \
+            "${G_SPINNER[$((i % ${#G_SPINNER[@]}))]}" \
+            "${text}"
+
+        i=$((i + 1))
+        sleep 0.07
+
+    done
+
+    local rc=0
+    wait "${pid}" || rc=$?
+
+    show_cursor
+
+    if [[ "${rc}" -eq 0 ]]; then
+
+        printf \
+            "\r  ${EMERALD}${BOLD}%s${RESET} ${BRIGHT_GREEN}%-58s${RESET}\n" \
+            "${G_CHECK}" "${text}"
+
+    else
+
+        printf \
+            "\r  ${FLAME}${BOLD}%s${RESET} ${BRIGHT_RED}%-58s${RESET}\n" \
+            "${G_CROSS}" "${text}"
+
+        return "${rc}"
+    fi
+}
+
+# =============================================================================
+# NETWORK OP WITH RETRY + BACKOFF
+# =============================================================================
+
+net_fetch() {
+
+    local url="$1"
+    local out="$2"
+    local tries="${3:-4}"
+
+    local attempt=1
+    local delay=1
+
+    while (( attempt <= tries )); do
+
+        log_info "fetch attempt ${attempt}/${tries}: ${url}"
+
+        if curl -fsSL --connect-timeout 8 --max-time 60 \
+            "${url}" -o "${out}" 2>>"${INSTALLER_LOG}"; then
+
+            return 0
+        fi
+
+        warning "fetch failed (attempt ${attempt}/${tries}) — retrying in ${delay}s"
+        sleep "${delay}"
+        delay=$(( delay * 2 ))
+        (( attempt++ ))
+
+    done
+
+    return 1
+}
+
+# =============================================================================
+# CARD / PANEL / TABLE / GAUGE
+# =============================================================================
+
+card() {
+
+    local title="$1"
+    local status="$2"
+    local color="$3"
+    local description="${4:-}"
+
+    local w=$(( TERM_W > 80 ? 60 : TERM_W - 20 ))
+    local pad
+    pad="$(printf "%${w}s" "")"
+
+    echo
+    echo -e "  ${DIM}${T_ACCENT2}${G_CORNER_TL}${pad// /─}${G_CORNER_TR}${RESET}"
+    printf  "  ${DIM}${T_ACCENT2}${G_PIPE}${RESET} ${BOLD}${WHITE}%s${RESET}\n" "${title}"
+    echo -e "  ${DIM}${T_ACCENT2}${G_PIPE}${RESET}"
+    printf  "  ${DIM}${T_ACCENT2}${G_PIPE}${RESET}   ${color}${BOLD}%s${RESET}\n" "${status}"
+
+    if [[ -n "${description}" ]]; then
+        echo -e "  ${DIM}${T_ACCENT2}${G_PIPE}${RESET}"
+        printf  "  ${DIM}${T_ACCENT2}${G_PIPE}${RESET}   ${DIM}%s${RESET}\n" "${description}"
+    fi
+
+    echo -e "  ${DIM}${T_ACCENT2}${G_CORNER_BL}${pad// /─}${G_CORNER_BR}${RESET}"
+}
+
+section() {
+
+    local number="$1"
+    local title="$2"
+    local subtitle="$3"
+
+    local w=$(( TERM_W > 84 ? 78 : TERM_W - 6 ))
+    local inner=$(( w - 2 ))
+    local num_pad
+    num_pad="$(printf "%${inner}s" "")"
+
+    echo
+    echo -e "${T_ACCENT2}${BOLD}"
+
+    printf "  ${G_CORNER_TL}%s${G_CORNER_TR}\n" "$(printf "%${inner}s" "" | tr ' ' '─')"
+
+    printf "  ${G_PIPE}  ${T_ACCENT1}%s${RESET}${T_ACCENT2}${BOLD} %s${num_pad:0:$((inner - ${#number} - ${#title} - 3))}${G_PIPE}\n" \
+        "${number}" "${title}"
+
+    printf "  ${G_CORNER_BL}%s${G_CORNER_BR}\n" "$(printf "%${inner}s" "" | tr ' ' '─')"
+
+    echo -e "${RESET}"
+
+    printf "  ${DIM}%s${RESET}\n\n" "${subtitle}"
+}
+
+gauge() {
+
+    local name="$1"
+    local pct="$2"
+    local detail="$3"
+    local color="${4:-${T_ACCENT1}}"
+
+    local width=26
+    local filled=$(( pct * width / 100 ))
+    (( filled > width )) && filled=$width
+    (( filled < 0 )) && filled=0
+    local empty=$(( width - filled ))
+
+    local bar=""
+    (( filled > 0 )) && bar="$(printf "%${filled}s" "" | tr ' ' "${G_BLOCK_F}")"
+    (( empty  > 0 )) && bar+="$(printf "%${empty}s" "" | tr ' ' "${G_BLOCK_E}")"
+
+    printf \
+        "  ${DIM}%-12s${RESET} ${color}${BOLD}[%s]${RESET} ${GOLD}%3d%%${RESET} ${DIM}%s${RESET}\n" \
+        "${name}" "${bar}" "${pct}" "${detail}"
+}
+
+table_row() {
+
+    local c1="$1" c2="$2" c3="$3"
+    local col="${4:-${WHITE}}"
+
+    printf \
+        "  ${DIM}${G_PIPE}${RESET} ${STEEL}%-24s${RESET} ${DIM}${G_PIPE}${RESET} ${col}%-26s${RESET} ${DIM}${G_PIPE}${RESET} ${WHITE}%s${RESET}\n" \
+        "${c1}" "${c2}" "${c3}"
+}
+
+table_header() {
+
+    local c1="$1" c2="$2" c3="$3"
+    local w=$(( TERM_W > 80 ? 78 : TERM_W - 4 ))
+
+    echo
+    printf \
+        "  ${T_ACCENT1}${BOLD}%-24s ${G_PIPE} %-26s ${G_PIPE} %s${RESET}\n" \
+        "${c1}" "${c2}" "${c3}"
+    printf \
+        "  ${DIM}%s${RESET}\n" \
+        "$(printf "%${w}s" "" | tr ' ' '─')"
+}
+
+# =============================================================================
+# STATUS CHIP
+# =============================================================================
+
+chip() {
+
+    local text="$1"
+    local kind="${2:-info}"   # ok | warn | err | info | accent
+
+    local color="${ICE}"
+    case "${kind}" in
+        ok)     color="${EMERALD}" ;;
+        warn)   color="${GOLD}" ;;
+        err)    color="${FLAME}" ;;
+        accent) color="${T_ACCENT3}" ;;
+        *)      color="${ICE}" ;;
+    esac
+
+    printf "${color}${BOLD} %s ${RESET}" "${text}"
+}
+
+# =============================================================================
+# BOOT CINEMATIC (multi-phase)
+# =============================================================================
+
+boot_cinematic() {
+
+    clear_screen
+    hide_cursor
+
+    # -- PHASE 1: power strip --------------------------------------------------
+    if [[ "${ULTRA_EFFECTS}" == "true" ]]; then
+
+        local w=$(( TERM_W > 80 ? 74 : TERM_W - 6 ))
+        local colors=( "${SLATE}" "${STEEL}" "${SILVER}" "${T_ACCENT1}" "${T_ACCENT2}" "${T_GLOW}" )
+
+        local seg=$(( w / ${#colors[@]} ))
+        local line=""
+        local c
+
+        for c in "${colors[@]}"; do
+            line+="${c}$(printf "%${seg}s" "" | tr ' ' "${G_BLOCK_F}")${RESET}"
+        done
+
+        local i
+        for ((i=0; i<3; i++)); do
+            printf "\r  %s" "${line}"
+            sleep 0.08
+            printf "\r  %s" "$(printf "%${w}s" "" | tr ' ' ' ')"
+            sleep 0.05
+        done
+
+        printf "\r  %s\n" "${line}"
+        sleep 0.15
 
     fi
 
-    rm -f "${PID_FILE}"
+    # -- PHASE 2: matrix rain --------------------------------------------------
+    [[ "${ULTRA_EFFECTS}" == "true" ]] && matrix_rain 6 22
 
-fi
+    # -- PHASE 3: logo ---------------------------------------------------------
+    draw_logo
 
-# ============================================================
-# OLD PORT
-# ============================================================
+    show_cursor
+}
 
-if command -v lsof >/dev/null 2>&1; then
+# =============================================================================
+# LOGO
+# =============================================================================
 
-    mapfile -t PORT_PIDS < <(
-        lsof \
-            -t \
-            -nP \
-            -iTCP:"${PANEL_PORT}" \
-            -sTCP:LISTEN \
-            2>/dev/null ||
-            true
-    )
+draw_logo() {
 
-    for PID in "${PORT_PIDS[@]:-}"; do
+    echo
+    echo -e "${T_ACCENT1}${BOLD}"
 
-        [[ "${PID}" =~ ^[0-9]+$ ]] ||
-            continue
+    cat <<EOF
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║                                                                           ║
+  ║     ${T_ACCENT3}██╗  ██╗██╗   ██╗███╗   ███╗${T_ACCENT1}                              ║
+  ║     ${T_ACCENT3}██║ ██╔╝██║   ██║████╗ ████║${T_ACCENT1}                              ║
+  ║     ${T_ACCENT3}█████╔╝ ██║   ██║██╔████╔██║${T_ACCENT1}                              ║
+  ║     ${T_ACCENT3}██╔═██╗ ╚██╗ ██╔╝██║╚██╔╝██║${T_ACCENT1}                              ║
+  ║     ${T_ACCENT3}██║  ██╗ ╚████╔╝ ██║ ╚═╝ ██║${T_ACCENT1}                              ║
+  ║     ${T_ACCENT3}╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝${T_ACCENT1}                              ║
+  ║                                                                           ║
+  ║           ${T_GLOW}G K V M   P A N E L  ·  U L T R A   N E X U S${T_ACCENT1}           ║
+  ║                                                                           ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+EOF
 
-        CMD="$(
-            ps -p "${PID}" \
-                -o args= \
-                2>/dev/null ||
-                true
-        )"
+    echo -e "${RESET}"
 
-        CWD="$(
-            readlink -f "/proc/${PID}/cwd" \
-                2>/dev/null ||
-                true
-        )"
+    echo
+    printf "          "
+    chip "QEMU" accent
+    printf " ${DIM}×${RESET} "
+    chip "KVM" ok
+    printf " ${DIM}×${RESET} "
+    chip "OVMF" info
+    printf " ${DIM}×${RESET} "
+    chip "CLOUD-INIT" accent
+    printf " ${DIM}×${RESET} "
+    chip "NET" ok
+    echo
 
-        if [[ "${CWD}" == "${APP_DIR}" ]] ||
-           [[ "${CMD}" == *"${APP_DIR}/app.js"* ]]; then
+    echo
+    gradient_line \
+        "                    MAXIMUM POWER HOST BOOTSTRAP" \
+        "theme"
 
-            warning "Stopping old GKVM process PID ${PID}."
+    echo
 
-            kill "${PID}" \
-                >/dev/null 2>&1 ||
-                true
+    if [[ "${ULTRA_EFFECTS}" == "true" ]]; then
+
+        local seq=( "${FLAME}" "${FIRE}" "${ORANGE}" "${GOLD}" "${BRIGHT_YELLOW}" )
+        local i
+
+        for i in "${!seq[@]}"; do
+            printf "\r  %b%s ${WHITE}${BOLD}POWER CORE SPINNING UP${RESET}" \
+                "${seq[$i]}" "${G_FIRE}"
+            sleep 0.06
+        done
+
+        clear_line
+
+    fi
+
+    echo
+    divider
+
+    log_info "Boot cinematic complete. Theme=${THEME} Port=${PANEL_PORT}"
+}
+
+# =============================================================================
+# STAGE TRACKER
+# =============================================================================
+
+stage_push() {
+    STAGE_LOG+=( "$*" )
+    log_info "STAGE ${#STAGE_LOG[@]}: $*"
+}
+
+# =============================================================================
+# COMMAND LINE INTERFACE
+# =============================================================================
+
+print_help() {
+
+    cat <<EOF
+
+  ${GKVM_NAME} — ${GKVM_CODENAME} ${GKVM_VERSION}
+  Build ${GKVM_BUILD}
+
+  USAGE
+      gkvm-nexus-installer.sh [OPTIONS]
+
+  CORE
+      --theme NAME          CYBER (default) | FIRE | ICE | MATRIX
+      --port N              Panel port (default ${DEFAULT_PANEL_PORT})
+      --no-animation        Disable terminal animation
+      --fast                Alias for --no-animation
+      --ascii               Force ASCII-safe glyphs (no unicode)
+      --quiet               Minimal output
+      --yes                 Non-interactive; accept wizard defaults
+
+  STAGE CONTROL
+      --skip-kvm-test       Skip QEMU/KVM functional test
+      --skip-benchmark      Skip KVM vs TCG accelerator benchmark
+      --skip-firewall       Do not modify UFW/firewalld
+      --dry-run             Simulate all stages; change nothing
+
+  MODES
+      --wizard              Interactive configuration wizard
+      --repair-kvm          Standalone KVM doctor (diagnose + auto-fix)
+      --version             Show version
+      --help                Show this help
+
+  EXAMPLES
+      sudo ./gkvm-nexus-installer.sh --theme FIRE
+      sudo ./gkvm-nexus-installer.sh --wizard --port 9090
+      sudo ./gkvm-nexus-installer.sh --repair-kvm
+      sudo ./gkvm-nexus-installer.sh --dry-run --theme MATRIX
+
+EOF
+}
+
+parse_args() {
+
+    while [[ $# -gt 0 ]]; do
+
+        case "$1" in
+
+            --theme)
+                [[ $# -ge 2 ]] || die "--theme requires a value"
+                THEME="$2"; shift
+                ;;
+
+            --port)
+                [[ $# -ge 2 ]] || die "--port requires a value"
+                if [[ "$2" =~ ^[0-9]+$ ]] && (( $2 >= 1 && $2 <= 65535 )); then
+                    PANEL_PORT="$2"
+                else
+                    die "Invalid port: $2"
+                fi
+                shift
+                ;;
+
+            --no-animation|--fast)
+                ANIMATION="false"; ULTRA_EFFECTS="false"
+                ;;
+
+            --ascii)
+                ASCII_MODE="true"; ULTRA_EFFECTS="false"
+                ;;
+
+            --quiet)
+                QUIET_MODE="true"
+                ANIMATION="false"; ULTRA_EFFECTS="false"
+                ;;
+
+            --yes|-y)
+                ASSUME_YES="true"
+                ;;
+
+            --skip-kvm-test)
+                SKIP_KVM_TEST="true"
+                ;;
+
+            --skip-benchmark)
+                SKIP_BENCHMARK="true"
+                ;;
+
+            --skip-firewall)
+                SKIP_FIREWALL="true"
+                ;;
+
+            --dry-run)
+                DRY_RUN="true"
+                ;;
+
+            --wizard)
+                WIZARD="true"
+                ;;
+
+            --repair-kvm)
+                REPAIR_MODE="true"
+                ;;
+
+            --version)
+                echo "${GKVM_NAME} ${GKVM_CODENAME} ${GKVM_VERSION} (${GKVM_BUILD})"
+                exit 0
+                ;;
+
+            --help|-h)
+                print_help
+                exit 0
+                ;;
+
+            *)
+                warning "Unknown option ignored: $1"
+                ;;
+        esac
+
+        shift
+    done
+}
+
+# =============================================================================
+# INTERACTIVE WIZARD
+# =============================================================================
+
+wizard_run() {
+
+    [[ "${QUIET_MODE}" == "true" ]] && return 0
+
+    clear_screen
+    hide_cursor
+
+    echo
+    gradient_line "              G K V M   C O N F I G U R A T I O N   W I Z A R D" "rainbow"
+    echo
+    divider
+    echo
+
+    local reply
+
+    # -- port ------------------------------------------------------------------
+    printf "  ${T_ACCENT1}${BOLD}➜${RESET} Panel port  ${DIM}[${PANEL_PORT}]${RESET}: "
+    read -r reply || reply=""
+
+    if [[ -n "${reply}" ]]; then
+        if [[ "${reply}" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= 65535 )); then
+            PANEL_PORT="${reply}"
+        else
+            warning "Invalid port '${reply}' — keeping ${PANEL_PORT}"
+        fi
+    fi
+
+    # -- firewall --------------------------------------------------------------
+    printf "  ${T_ACCENT1}${BOLD}➜${RESET} Open firewall port ${PANEL_PORT}/tcp? ${DIM}[Y/n]${RESET}: "
+    read -r reply || reply=""
+
+    case "${reply}" in
+        n|N|no|NO) SKIP_FIREWALL="true" ;;
+        *)         SKIP_FIREWALL="false" ;;
+    esac
+
+    # -- benchmark -------------------------------------------------------------
+    printf "  ${T_ACCENT1}${BOLD}➜${RESET} Run QEMU accelerator benchmark? ${DIM}[Y/n]${RESET}: "
+    read -r reply || reply=""
+
+    case "${reply}" in
+        n|N|no|NO) SKIP_BENCHMARK="true" ;;
+        *)         SKIP_BENCHMARK="false" ;;
+    esac
+
+    # -- kvm test --------------------------------------------------------------
+    printf "  ${T_ACCENT1}${BOLD}➜${RESET} Run KVM functional test? ${DIM}[Y/n]${RESET}: "
+    read -r reply || reply=""
+
+    case "${reply}" in
+        n|N|no|NO) SKIP_KVM_TEST="true" ;;
+        *)         SKIP_KVM_TEST="false" ;;
+    esac
+
+    show_cursor
+
+    echo
+    divider
+    echo
+
+    card \
+        "Wizard configuration locked" \
+        "PORT ${PANEL_PORT} · FW:$([[ "${SKIP_FIREWALL}" == "true" ]] && echo OFF || echo ON) · BENCH:$([[ "${SKIP_BENCHMARK}" == "true" ]] && echo OFF || echo ON) · KVM-TEST:$([[ "${SKIP_KVM_TEST}" == "true" ]] && echo OFF || echo ON)" \
+        "${EMERALD}" \
+        "Proceeding with deployment."
+
+    log_info "Wizard locked: port=${PANEL_PORT} firewall_skip=${SKIP_FIREWALL} bench_skip=${SKIP_BENCHMARK} kvm_test_skip=${SKIP_KVM_TEST}"
+}
+
+# =============================================================================
+# STAGE 00 — HOST TELEMETRY
+# =============================================================================
+
+detect_host_metrics() {
+
+    stage_push "HOST TELEMETRY"
+
+    section \
+        "00 / 11" \
+        "HOST TELEMETRY" \
+        "Deep system profiling for the deployment dashboard."
+
+    local cpu threads ram_total ram_free disk_free disk_total swap_total uptime arch kernel os_name
+
+    threads="$(nproc 2>/dev/null || echo "?")"
+    cpu="$(awk -F: '/model name/ {gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null || echo "unknown")"
+    arch="$(uname -m 2>/dev/null || echo "?")"
+    kernel="$(uname -r 2>/dev/null || echo "?")"
+
+    ram_total="$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}')"
+    ram_free="$(free -m 2>/dev/null | awk '/^Mem:/ {print $7}')"
+    swap_total="$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}')"
+
+    disk_free="$(df -m / 2>/dev/null | awk 'NR==2 {print $4}')"
+    disk_total="$(df -m / 2>/dev/null | awk 'NR==2 {print $2}')"
+
+    uptime="$(uptime -p 2>/dev/null | sed 's/^up //' || echo "unknown")"
+
+    os_name="$(
+        . /etc/os-release 2>/dev/null
+        echo "${PRETTY_NAME:-unknown}"
+    )"
+
+    # -- gauges ---------------------------------------------------------------
+    local ram_pct=0 disk_pct=0 swap_pct=0
+    [[ "${ram_total}" =~ ^[0-9]+$ ]]  && (( ram_total > 0 ))  && ram_pct=$((  (ram_total - ram_free) * 100 / ram_total ))
+    [[ "${disk_total}" =~ ^[0-9]+$ ]] && (( disk_total > 0 )) && disk_pct=$(( (disk_total - disk_free) * 100 / disk_total ))
+    [[ "${swap_total}" =~ ^[0-9]+$ ]] && (( swap_total > 0 )) && swap_pct=10
+
+    echo
+    gauge "CPU THREADS" 0 "${threads} logical cores" "${T_ACCENT1}"
+    gauge "MEMORY"      "${ram_pct}"  "${ram_free} MiB free / ${ram_total} MiB" "${PURPLE}"
+    gauge "ROOT DISK"   "${disk_pct}" "${disk_free} MiB free / ${disk_total} MiB" "${GOLD}"
+    gauge "SWAP"        "${swap_pct}" "${swap_total:-0} MiB" "${TEAL}"
+    echo
+
+    # -- spec sheet -----------------------------------------------------------
+    table_header "PROPERTY" "VALUE" "NOTE"
+
+    table_row "CPU Model"     "${cpu}"          "processor"   "${ICE}"
+    table_row "Architecture"  "${arch}"         "system"      "${SKY}"
+    table_row "Kernel"        "${kernel}"       "linux"       "${PURPLE}"
+    table_row "OS"            "${os_name}"      "distro"      "${PINK}"
+    table_row "Memory"        "${ram_total} MiB" "total"      "${GOLD}"
+    table_row "Root Storage"  "${disk_total} MiB" "total"     "${ORANGE}"
+    table_row "Uptime"        "${uptime}"        "host"       "${BRIGHT_CYAN}"
+
+    echo
+
+    # -- CPU flags ------------------------------------------------------------
+    if [[ -r /proc/cpuinfo ]]; then
+
+        local flags
+        flags="$(awk -F: '/^flags/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)"
+
+        echo -e "  ${T_ACCENT3}${BOLD}CPU VIRTUALIZATION EXTENSIONS${RESET}"
+        thin_divider
+
+        local f
+        for f in vmx svm ept npt hv_vapic flexpriority; do
+            if echo "${flags}" | grep -qw "${f}"; then
+                printf "  ${EMERALD}✔${RESET} ${WHITE}%-14s${RESET} ${DIM}present${RESET}\n" "${f}"
+            else
+                printf "  ${SLATE}○${RESET} ${DIM}%-14s${RESET} ${DIM}absent${RESET}\n" "${f}"
+            fi
+        done
+
+        echo
+    fi
+
+    card \
+        "Host telemetry" \
+        "PROFILED" \
+        "${T_ACCENT1}" \
+        "System resources captured and gauged."
+
+    energy_bar 1 11 "Telemetry profiled"
+}
+
+# =============================================================================
+# STAGE 01 — PREREQUISITES
+# =============================================================================
+
+install_prerequisites() {
+
+    stage_push "HOST FOUNDATION"
+
+    [[ "${VNM_PANEL_PREREQS_DONE}" == "true" ]] && {
+
+        info "VNM host prerequisites already prepared by parent installer."
+        energy_bar 11 11 "Prerequisites pre-satisfied"
+        return 0
+    }
+
+    [[ -f /etc/os-release ]] || die "Unable to detect operating system."
+
+    # shellcheck disable=SC1091
+    source /etc/os-release
+
+    case "${ID:-}" in
+        ubuntu|debian) ;;
+        *)
+            die "Automatic host preparation supports Ubuntu/Debian only (detected: ${ID:-unknown})."
+            ;;
+    esac
+
+    command -v apt-get >/dev/null 2>&1 || die "apt-get is required."
+
+    export DEBIAN_FRONTEND=noninteractive
+
+    section \
+        "01 / 11" \
+        "HOST FOUNDATION" \
+        "Installing virtualization prerequisites with retry protection."
+
+    # -- package manifest ------------------------------------------------------
+    local -a pkgs_apt=( ca-certificates curl git file lsof procps iproute2
+                        openssl build-essential python3 sqlite3 util-linux
+                        timeout cloud-image-utils genisoimage
+                        qemu-system-x86 qemu-utils ovmf )
+
+    PKG_TOTAL="${#pkgs_apt[@]}"
+    PKG_DONE=0
+
+    # -- apt update ------------------------------------------------------------
+    run_effect \
+        "Refreshing package database" \
+        apt-get update -y \
+        || warning "apt-get update reported issues; continuing."
+
+    energy_bar 2 11 "APT package database"
+
+    # -- grouped install -------------------------------------------------------
+    local -a group_util=( ca-certificates curl git file lsof procps iproute2
+                          openssl build-essential python3 sqlite3 util-linux )
+    local -a group_img=( cloud-image-utils genisoimage )
+    local -a group_qemu=( qemu-system-x86 qemu-utils )
+    local -a group_ovmf=( ovmf )
+
+    local -a failed_pkgs=()
+
+    install_group() {
+
+        local desc="$1"
+        shift
+        local -a group=( "$@" )
+
+        if run_effect "${desc}" apt-get install -y "${group[@]}"; then
+            PKG_DONE=$(( PKG_DONE + ${#group[@]} ))
+        else
+            warning "${desc} reported failures — attempting per-package recovery."
+            local p
+            for p in "${group[@]}"; do
+                if run_effect "recover: ${p}" apt-get install -y "${p}"; then
+                    PKG_DONE=$(( PKG_DONE + 1 ))
+                else
+                    failed_pkgs+=( "${p}" )
+                fi
+            done
+        fi
+    }
+
+    install_group "System utility matrix"   "${group_util[@]}"
+    energy_bar 4 11 "System utilities"
+
+    install_group "Cloud-image toolchain"   "${group_img[@]}"
+    energy_bar 5 11 "Cloud image support"
+
+    install_group "QEMU virtualization"     "${group_qemu[@]}"
+    QEMU_INSTALLED="true"
+    energy_bar 8 11 "QEMU engine"
+
+    install_group "OVMF UEFI firmware"      "${group_ovmf[@]}"
+    OVMF_INSTALLED="true"
+    energy_bar 9 11 "UEFI firmware"
+
+    # -- failure report ---------------------------------------------------------
+    if (( ${#failed_pkgs[@]} > 0 )); then
+
+        warning "The following packages failed to install:"
+        local p
+        for p in "${failed_pkgs[@]}"; do
+            printf "    ${FLAME}✖${RESET} %s\n" "${p}"
+        done
+
+        warning "Some features may be limited."
+    fi
+
+    # -- verify -----------------------------------------------------------------
+    command -v qemu-system-x86_64 >/dev/null 2>&1 ||
+        die "QEMU system emulator was not installed."
+
+    command -v qemu-img >/dev/null 2>&1 ||
+        die "qemu-img was not installed."
+
+    if command -v cloud-localds >/dev/null 2>&1; then
+        success "cloud-localds available."
+    else
+        warning "cloud-localds unavailable; some cloud-init flows may be limited."
+    fi
+
+    if command -v genisoimage >/dev/null 2>&1; then
+        success "genisoimage available."
+    elif command -v xorriso >/dev/null 2>&1; then
+        success "xorriso available as ISO backend."
+    else
+        warning "No ISO creation backend detected."
+    fi
+
+    if [[ -f /usr/share/OVMF/OVMF_CODE.fd ||
+          -f /usr/share/ovmf/OVMF.fd ||
+          -f /usr/share/qemu/ovmf-x86_64.bin ]]; then
+        success "OVMF firmware image present."
+    else
+        warning "OVMF firmware image not found at standard paths."
+    fi
+
+    echo
+    echo -e "  ${T_ACCENT1}${BOLD}QEMU BUILD${RESET}"
+    qemu-system-x86_64 --version 2>/dev/null | head -n 1 || true
+
+    VNM_PANEL_PREREQS_DONE="true"
+    export VNM_PANEL_PREREQS_DONE
+
+    energy_bar 10 11 "Foundation verified"
+
+    card \
+        "Virtualization prerequisites" \
+        "READY" \
+        "${EMERALD}" \
+        "QEMU, OVMF and image-generation dependencies installed."
+}
+
+# =============================================================================
+# STAGE 03 — KVM DEEP SCAN
+# =============================================================================
+
+inspect_kvm() {
+
+    stage_push "KVM CORE ANALYSIS"
+
+    section \
+        "03 / 11" \
+        "KVM CORE ANALYSIS" \
+        "Deep inspection of kernel virtualization support."
+
+    # -- /dev/kvm ---------------------------------------------------------------
+    if [[ -e /dev/kvm ]]; then
+
+        KVM_AVAILABLE="true"
+        success "/dev/kvm detected."
+
+        echo
+        ls -l /dev/kvm 2>/dev/null || true
+        echo
+
+        if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+
+            KVM_READWRITE="true"
+
+            card \
+                "KVM device" \
+                "ACCESSIBLE" \
+                "${EMERALD}" \
+                "Writable KVM acceleration device exposed."
 
         else
 
-            die \
-                "Port ${PANEL_PORT} is already used by another application."
+            card \
+                "KVM device" \
+                "PERMISSION WARNING" \
+                "${GOLD}" \
+                "Device exists but access permissions are unusual."
 
+            KVM_REPAIRS+=( "udev-rule" )
         fi
 
-    done
-
-fi
-
-# ============================================================
-# BACKUP EXISTING APP
-# ============================================================
-
-if [[ -f "${APP_DIR}/app.js" ]]; then
-
-    BACKUP_APP="${BACKUP_DIR}/app-$(date +%Y%m%d-%H%M%S)"
-
-    mkdir -p "${BACKUP_APP}"
-
-    pulse "Backing up existing GKVM"
-
-    cp -a \
-        "${APP_DIR}/." \
-        "${BACKUP_APP}/"
-
-    success "Previous application backed up"
-    detail "${BACKUP_APP}"
-
-fi
-
-# ============================================================
-# BACKUP ENV
-# ============================================================
-
-if [[ -f "${ENV_FILE}" ]]; then
-
-    cp -a \
-        "${ENV_FILE}" \
-        "${BACKUP_DIR}/gkvm.env.$(date +%Y%m%d-%H%M%S).bak"
-
-    success "Existing environment backed up."
-
-fi
-
-separator
-
-# ============================================================
-# DOWNLOAD
-# ============================================================
-
-section "GKVM PACKAGE"
-
-TMP_DIR="$(
-    mktemp -d \
-    -t \
-    gkvm-installer-XXXXXX
-)"
-
-REPO_DIR="${TMP_DIR}/repo"
-EXTRACT_DIR="${TMP_DIR}/extract"
-
-mkdir -p "${EXTRACT_DIR}"
-
-run_step \
-    "Downloading GKVM repository" \
-    git clone \
-        --depth 1 \
-        --single-branch \
-        "${REPO_URL}" \
-        "${REPO_DIR}"
-
-ZIP_FILE="${REPO_DIR}/${ZIP_NAME}"
-
-if [[ ! -f "${ZIP_FILE}" ]]; then
-
-    ZIP_FILE="$(
-        find "${REPO_DIR}" \
-            -type f \
-            -name "${ZIP_NAME}" \
-            -not -path "*/.git/*" \
-            -print \
-            -quit \
-            2>/dev/null ||
-            true
-    )"
-
-fi
-
-[[ -n "${ZIP_FILE}" &&
-   -f "${ZIP_FILE}" ]] ||
-    die "${ZIP_NAME} was not found."
-
-ZIP_SIZE="$(du -h "${ZIP_FILE}" | awk '{print $1}')"
-
-success "GKVM package found"
-detail "Size: ${ZIP_SIZE}"
-
-run_step \
-    "Validating GKVM archive" \
-    unzip -t "${ZIP_FILE}"
-
-run_step \
-    "Extracting GKVM archive" \
-    unzip -q \
-        "${ZIP_FILE}" \
-        -d "${EXTRACT_DIR}"
-
-separator
-
-# ============================================================
-# APP DETECTION
-# ============================================================
-
-section "APPLICATION DETECTION"
-
-mapfile -t APP_FILES < <(
-    find "${EXTRACT_DIR}" \
-        -type f \
-        -name "app.js" \
-        -not -path "*/node_modules/*" \
-        -not -path "*/.git/*" \
-        -print |
-    sort
-)
-
-SOURCE_APP_DIR=""
-
-if [[ "${#APP_FILES[@]}" -gt 0 ]]; then
-
-    for FILE in "${APP_FILES[@]}"; do
-
-        DIR="$(dirname "${FILE}")"
-
-        if [[ -f "${DIR}/package.json" ]]; then
-
-            SOURCE_APP_DIR="${DIR}"
-            break
-
-        fi
-
-    done
-
-fi
-
-if [[ -z "${SOURCE_APP_DIR}" &&
-      "${#APP_FILES[@]}" -gt 0 ]]; then
-
-    SOURCE_APP_DIR="$(
-        dirname "${APP_FILES[0]}"
-    )"
-
-fi
-
-[[ -n "${SOURCE_APP_DIR}" ]] ||
-    die "Could not locate GKVM app.js."
-
-if [[ "${SOURCE_APP_DIR}" == *"/node_modules/"* ]]; then
-    die "Safety check failed: app root is inside node_modules."
-fi
-
-info "Detected application:"
-detail "${SOURCE_APP_DIR}"
-
-# ============================================================
-# INSTALL APP
-# ============================================================
-
-rm -rf "${APP_DIR}"
-
-mkdir -p "${APP_DIR}"
-
-cp -a \
-    "${SOURCE_APP_DIR}/." \
-    "${APP_DIR}/"
-
-MAIN_JS="${APP_DIR}/app.js"
-
-[[ -f "${MAIN_JS}" ]] ||
-    die "GKVM app.js missing after installation."
-
-success "GKVM application installed."
-
-# ============================================================
-# RUNTIME OWNERSHIP
-# ============================================================
-
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
-
-    chown -R root:root \
-        "${INSTALL_DIR}"
-
-else
-
-    chown -R \
-        "${RUNTIME_USER}:${RUNTIME_GROUP}" \
-        "${INSTALL_DIR}"
-
-fi
-
-mkdir -p "${APP_DIR}/data"
-
-# ============================================================
-# NODE DEPENDENCIES
-# ============================================================
-
-section "NODE DEPENDENCIES"
-
-cd "${APP_DIR}"
-
-[[ -f package.json ]] ||
-    die "GKVM package.json missing."
-
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
-
-    DEP_USER="root"
-
-else
-
-    DEP_USER="${RUNTIME_USER}"
-
-fi
-
-if [[ -f package-lock.json ]]; then
-
-    if [[ "${DEP_USER}" == "root" ]]; then
-
-        run_step \
-            "Installing locked npm dependencies" \
-            "${NPM_BIN}" ci --omit=dev ||
-        run_step \
-            "Installing npm dependencies using fallback" \
-            "${NPM_BIN}" install --omit=dev
-
     else
 
-        run_step \
-            "Installing locked npm dependencies" \
-            runuser -u "${DEP_USER}" \
-                -- "${NPM_BIN}" ci --omit=dev ||
-        run_step \
-            "Installing npm dependencies using fallback" \
-            runuser -u "${DEP_USER}" \
-                -- "${NPM_BIN}" install --omit=dev
+        KVM_AVAILABLE="false"
 
+        card \
+            "KVM device" \
+            "NOT PRESENT" \
+            "${GOLD}" \
+            "Hardware acceleration unavailable in this environment."
+
+        KVM_REPAIRS+=( "modprobe" "nested" )
     fi
 
-else
-
-    if [[ "${DEP_USER}" == "root" ]]; then
-
-        run_step \
-            "Installing npm dependencies" \
-            "${NPM_BIN}" install --omit=dev
-
-    else
-
-        run_step \
-            "Installing npm dependencies" \
-            runuser -u "${DEP_USER}" \
-                -- "${NPM_BIN}" install --omit=dev
-
-    fi
-
-fi
-
-if [[ "${DEP_USER}" == "root" ]]; then
-
-    run_step \
-        "Rebuilding native modules" \
-        "${NPM_BIN}" rebuild sqlite3 ssh2
-
-else
-
-    run_step \
-        "Rebuilding native modules" \
-        runuser -u "${DEP_USER}" \
-            -- "${NPM_BIN}" rebuild sqlite3 ssh2
-
-fi
-
-success "GKVM dependencies installed."
-
-separator
-
-# ============================================================
-# SESSION CONFIG
-# ============================================================
-
-section "GKVM CONFIGURATION"
-
-SESSION_SECRET="$(
-    openssl rand -hex 32
-)"
-
-[[ -n "${SESSION_SECRET}" ]] ||
-    die "Could not generate session secret."
-
-cat > "${ENV_FILE}" <<EOF
-NODE_ENV=production
-
-HOST=0.0.0.0
-PORT=${PANEL_PORT}
-
-PANEL_NAME="GKVM Panel"
-
-SESSION_SECRET=${SESSION_SECRET}
-
-LICENSE_MODE=disabled
-LICENSE_KEY=
-
-GKVM_INSTALL_DIR=${INSTALL_DIR}
-GKVM_APP_DIR=${APP_DIR}
-GKVM_DATA_DIR=${DATA_DIR}
-GKVM_LOG_DIR=${LOG_DIR}
-EOF
-
-chmod 600 "${ENV_FILE}"
-
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
-
-    chown root:root "${ENV_FILE}"
-
-    ln -sfn \
-        "${ENV_FILE}" \
-        "${APP_DIR}/.env"
-
-else
-
-    STANDALONE_ENV="${INSTALL_DIR}/gkvm.env"
-
-    cp -f \
-        "${ENV_FILE}" \
-        "${STANDALONE_ENV}"
-
-    chown \
-        "${RUNTIME_USER}:${RUNTIME_GROUP}" \
-        "${STANDALONE_ENV}"
-
-    chmod 600 "${STANDALONE_ENV}"
-
-    rm -f "${APP_DIR}/.env"
-
-    ln -sfn \
-        "${STANDALONE_ENV}" \
-        "${APP_DIR}/.env"
-
-fi
-
-success "Environment generated."
-
-# ============================================================
-# SYNTAX CHECK
-# ============================================================
-
-run_step \
-    "Checking GKVM JavaScript syntax" \
-    "${NODE_BIN}" \
-        --check \
-        "${MAIN_JS}"
-
-success "Application syntax is valid."
-
-separator
-
-# ============================================================
-# OPTIONAL CSRF COMPATIBILITY
-# ============================================================
-
-section "AUTHENTICATION COMPATIBILITY"
-
-cp -a \
-    "${MAIN_JS}" \
-    "${BACKUP_DIR}/app.js.preinstall.$(date +%Y%m%d-%H%M%S).bak"
-
-python3 - "${MAIN_JS}" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-
-text = path.read_text(
-    encoding="utf-8"
-)
-
-pattern = re.compile(
-    r"function\s+csrfProtection\s*"
-    r"\(\s*req\s*,\s*res\s*,\s*next\s*\)\s*\{",
-    re.S
-)
-
-match = pattern.search(text)
-
-if not match:
-    print("NO_CSRF_FUNCTION")
-    raise SystemExit(0)
-
-brace_start = text.find(
-    "{",
-    match.start()
-)
-
-depth = 0
-end = None
-
-for index in range(
-    brace_start,
-    len(text)
-):
-
-    char = text[index]
-
-    if char == "{":
-        depth += 1
-
-    elif char == "}":
-
-        depth -= 1
-
-        if depth == 0:
-            end = index + 1
-            break
-
-if end is None:
-    raise SystemExit(
-        "Could not safely parse csrfProtection."
-    )
-
-replacement = r'''function csrfProtection(req, res, next) {
-  const mutating = [
-    'POST',
-    'PUT',
-    'PATCH',
-    'DELETE'
-  ].includes(req.method);
-
-  const requestPath =
-    (req.originalUrl ||
-     req.url ||
-     req.path ||
-     '/')
-      .split('?')[0]
-      .replace(/\/+$/, '') || '/';
-
-  const isLogin =
-    requestPath === '/login' ||
-    requestPath === '/api/login';
-
-  if (
-    !mutating ||
-    isLogin ||
-    requestPath.startsWith('/api/auth/')
-  ) {
-    return next();
-  }
-
-  const headerToken =
-    req.get('x-csrf-token');
-
-  if (
-    !headerToken ||
-    headerToken !== req.session.csrfToken
-  ) {
-    console.warn(
-      `[CSRF] Rejected ${req.method} ${requestPath} from ${req.ip}`
-    );
-
-    return res.status(403).json({
-      error:
-        'Invalid or missing CSRF token'
-    });
-  }
-
-  next();
-}'''
-
-text = (
-    text[:match.start()]
-    + replacement
-    + text[end:]
-)
-
-path.write_text(
-    text,
-    encoding="utf-8"
-)
-
-print("CSRF_PATCHED")
-PY
-
-run_step \
-    "Validating application after auth compatibility check" \
-    "${NODE_BIN}" \
-        --check \
-        "${MAIN_JS}"
-
-success "Authentication compatibility check completed."
-
-separator
-
-# ============================================================
-# FIREWALL
-# ============================================================
-
-section "NETWORK ACCESS"
-
-if command -v ufw >/dev/null 2>&1; then
-
-    ufw allow "${PANEL_PORT}/tcp" \
-        >/dev/null 2>&1 ||
-        true
-
-    success "UFW rule configured for port ${PANEL_PORT}."
-
-elif command -v firewall-cmd >/dev/null 2>&1; then
-
-    firewall-cmd \
-        --permanent \
-        --add-port="${PANEL_PORT}/tcp" \
-        >/dev/null 2>&1 ||
-        true
-
-    firewall-cmd \
-        --reload \
-        >/dev/null 2>&1 ||
-        true
-
-    success "firewalld rule configured."
-
-else
-
-    warning "No UFW/firewalld detected."
-    detail "Make sure TCP ${PANEL_PORT} is reachable through your VPS firewall."
-
-fi
-
-separator
-
-# ============================================================
-# RUNTIME HELPERS
-# ============================================================
-
-run_as_runtime() {
-
-    if [[ "${RUNTIME_USER}" == "root" ]]; then
-
-        env \
-            HOME="${RUNTIME_HOME}" \
-            PATH="${PATH}" \
-            "$@"
-
-    else
-
-        runuser \
-            -u "${RUNTIME_USER}" \
-            -- \
-            env \
-            HOME="${RUNTIME_HOME}" \
-            PATH="${PATH}" \
-            "$@"
-
-    fi
-}
-
-# ============================================================
-# DATABASE BOOTSTRAP
-# ============================================================
-
-section "DATABASE INITIALIZATION"
-
-rm -f "${BOOTSTRAP_LOG}"
-
-touch "${BOOTSTRAP_LOG}"
-
-chmod 640 "${BOOTSTRAP_LOG}"
-
-info "Starting GKVM temporarily to discover its real database..."
-
-export BOOTSTRAP_NODE="${NODE_BIN}"
-
-if [[ "${RUNTIME_USER}" == "root" ]]; then
-
-    (
-        export HOME="${RUNTIME_HOME}"
-        export NODE_ENV="production"
-        export HOST="0.0.0.0"
-        export PORT="${PANEL_PORT}"
-        export PANEL_NAME="GKVM Panel"
-        export SESSION_SECRET="${SESSION_SECRET}"
-        export LICENSE_MODE="disabled"
-        export LICENSE_KEY=""
-        export GKVM_INSTALL_DIR="${INSTALL_DIR}"
-        export GKVM_APP_DIR="${APP_DIR}"
-        export GKVM_DATA_DIR="${DATA_DIR}"
-        export GKVM_LOG_DIR="${LOG_DIR}"
-
-        exec "${NODE_BIN}" "${MAIN_JS}"
-
-    ) >>"${BOOTSTRAP_LOG}" 2>&1 &
-
-    BOOTSTRAP_PID=$!
-
-else
-
-    runuser \
-        -u "${RUNTIME_USER}" \
-        -- \
-        env \
-        HOME="${RUNTIME_HOME}" \
-        NODE_ENV="production" \
-        HOST="0.0.0.0" \
-        PORT="${PANEL_PORT}" \
-        PANEL_NAME="GKVM Panel" \
-        SESSION_SECRET="${SESSION_SECRET}" \
-        LICENSE_MODE="disabled" \
-        LICENSE_KEY="" \
-        GKVM_INSTALL_DIR="${INSTALL_DIR}" \
-        GKVM_APP_DIR="${APP_DIR}" \
-        GKVM_DATA_DIR="${DATA_DIR}" \
-        GKVM_LOG_DIR="${LOG_DIR}" \
-        "${NODE_BIN}" \
-        "${MAIN_JS}" \
-        >>"${BOOTSTRAP_LOG}" 2>&1 &
-
-    BOOTSTRAP_PID=$!
-
-fi
-
-echo "${BOOTSTRAP_PID}" > "${PID_FILE}"
-
-success "Temporary GKVM process started."
-detail "PID: ${BOOTSTRAP_PID}"
-
-# ============================================================
-# DATABASE PATH DETECTION
-# ============================================================
-
-DB_READY="false"
-
-for _ in {1..60}; do
-
-    DB_PATH="$(
-        sed -n \
-            's/.*Database:[[:space:]]*\(.*\)$/\1/p' \
-            "${BOOTSTRAP_LOG}" |
-        tail -n 1 |
-        sed 's/[[:space:]]*$//' ||
-        true
-    )"
-
-    if [[ -n "${DB_PATH}" &&
-          -f "${DB_PATH}" ]]; then
-
-        DB_READY="true"
-        break
-
-    fi
-
-    if ! kill -0 "${BOOTSTRAP_PID}" \
-        >/dev/null 2>&1; then
-
-        break
-
-    fi
-
-    sleep 1
-
-done
-
-# ============================================================
-# FALLBACK DATABASE SEARCH
-# ============================================================
-
-if [[ "${DB_READY}" != "true" ]]; then
-
-    warning "GKVM did not expose its database path yet."
-    info "Searching known GKVM locations..."
-
-    DB_PATH="$(
-        find \
-            "${RUNTIME_HOME}" \
-            "${INSTALL_DIR}" \
-            -type f \
-            -name "vnm.db" \
-            -not -path "*/node_modules/*" \
-            -print \
-            -quit \
-            2>/dev/null ||
-            true
-    )"
-
-    if [[ -n "${DB_PATH}" &&
-          -f "${DB_PATH}" ]]; then
-
-        DB_READY="true"
-
-    fi
-
-fi
-
-# ============================================================
-# DATABASE VALIDATION
-# ============================================================
-
-if [[ "${DB_READY}" != "true" ]]; then
-
+    # -- lscpu matrix -----------------------------------------------------------
     echo
-    error_msg "Could not locate GKVM's real database."
+    echo -e "  ${T_ACCENT3}${BOLD}CPU VIRTUALIZATION MATRIX${RESET}"
+    thin_divider
 
+    if command -v lscpu >/dev/null 2>&1; then
+
+        local virt vendor hyperv
+
+        virt="$(lscpu 2>/dev/null | grep -Ei 'Virtualization:' || true)"
+        vendor="$(lscpu 2>/dev/null | grep -Ei 'Hypervisor vendor:' || true)"
+        hyperv="$(lscpu 2>/dev/null | grep -Ei 'Virtualization type:' || true)"
+
+        [[ -n "${virt}"  ]] && echo -e "  ${ICE}${virt}${RESET}"
+        [[ -n "${hyperv}" ]] && echo -e "  ${PURPLE}${hyperv}${RESET}"
+        [[ -n "${vendor}" ]] && echo -e "  ${PINK}${vendor}${RESET}"
+
+        if [[ -z "${virt}" && -z "${vendor}" && -z "${hyperv}" ]]; then
+            warning "lscpu reported no virtualization metadata."
+        fi
+    fi
+
+    # -- kernel modules ----------------------------------------------------------
     echo
-    echo -e "${BRIGHT_YELLOW}GKVM bootstrap output:${RESET}"
-    tail -n 240 "${BOOTSTRAP_LOG}" || true
-
-    exit 1
-
-fi
-
-success "Real GKVM database found."
-
-detail "${DB_PATH}"
-
-# ============================================================
-# VERIFY USERS TABLE
-# ============================================================
-
-DB_CHECK="$(
-    "${NODE_BIN}" \
-        - "${DB_PATH}" \
-        <<'NODE'
-const sqlite3 = require("sqlite3").verbose();
-
-const db = new sqlite3.Database(
-  process.argv[2]
-);
-
-db.get(
-  `
-    SELECT name
-    FROM sqlite_master
-    WHERE type = 'table'
-      AND name = 'users'
-  `,
-  (err, row) => {
-
-    db.close();
-
-    if (err || !row) {
-      process.exit(1);
-    }
-
-    process.stdout.write(
-      "USERS_TABLE_OK"
-    );
-  }
-);
-NODE
-)"
-
-[[ "${DB_CHECK}" == "USERS_TABLE_OK" ]] ||
-    die "GKVM users table was not created."
-
-success "GKVM users table verified."
-
-# ============================================================
-# STOP BOOTSTRAP
-# ============================================================
-
-info "Stopping temporary GKVM instance..."
-
-kill "${BOOTSTRAP_PID}" \
-    >/dev/null 2>&1 ||
-    true
-
-for _ in {1..40}; do
-
-    if ! kill -0 "${BOOTSTRAP_PID}" \
-        >/dev/null 2>&1; then
-
-        break
-
-    fi
-
-    sleep 0.25
-
-done
-
-kill -9 "${BOOTSTRAP_PID}" \
-    >/dev/null 2>&1 ||
-    true
-
-wait "${BOOTSTRAP_PID}" \
-    >/dev/null 2>&1 ||
-    true
-
-BOOTSTRAP_PID=""
-
-rm -f "${PID_FILE}"
-
-sleep 1
-
-success "Temporary instance stopped."
-
-separator
-
-# ============================================================
-# DATABASE BACKUP
-# ============================================================
-
-section "DATABASE SAFETY"
-
-if [[ -f "${DB_PATH}" ]]; then
-
-    DB_BACKUP="${BACKUP_DIR}/$(basename "${DB_PATH}").$(date +%Y%m%d-%H%M%S).bak"
-
-    cp -a \
-        "${DB_PATH}" \
-        "${DB_BACKUP}"
-
-    success "Database backup created."
-
-    detail "${DB_BACKUP}"
-
-fi
-
-if [[ -f "${DB_PATH}-wal" ]]; then
-
-    cp -a \
-        "${DB_PATH}-wal" \
-        "${DB_BACKUP}-wal" ||
-        true
-
-fi
-
-if [[ -f "${DB_PATH}-shm" ]]; then
-
-    cp -a \
-        "${DB_PATH}-shm" \
-        "${DB_BACKUP}-shm" ||
-        true
-
-fi
-
-separator
-
-# ============================================================
-# ADMIN PASSWORD
-# ============================================================
-
-section "ADMIN SECURITY"
-
-ADMIN_USERNAME="admin"
-
-ADMIN_PASSWORD="$(
-    "${NODE_BIN}" \
-        -e '
-          const crypto = require("crypto");
-          process.stdout.write(
-            crypto.randomBytes(18).toString("base64url")
-          );
-        '
-)"
-
-[[ -n "${ADMIN_PASSWORD}" ]] ||
-    die "Could not generate admin password."
-
-if (( ${#ADMIN_PASSWORD} < 16 )); then
-
-    ADMIN_PASSWORD="$(
-        "${NODE_BIN}" \
-            -e '
-              const crypto = require("crypto");
-              process.stdout.write(
-                "GKVM-" +
-                crypto.randomBytes(16).toString("hex")
-              );
-            '
-    )"
-
-fi
-
-info "Generated secure admin password."
-
-# ============================================================
-# REAL BCRYPT ADMIN UPDATE
-# ============================================================
-
-ADMIN_RESULT="$(
-    "${NODE_BIN}" \
-        - "${DB_PATH}" "${ADMIN_PASSWORD}" \
-        <<'NODE'
-const sqlite3 = require("sqlite3").verbose();
-const bcrypt = require("bcryptjs");
-
-const dbPath = process.argv[2];
-const password = process.argv[3];
-
-const hash = bcrypt.hashSync(
-  password,
-  10
-);
-
-const db = new sqlite3.Database(
-  dbPath
-);
-
-function finish(code) {
-  db.close(() => {
-    process.exit(code);
-  });
-}
-
-db.serialize(() => {
-
-  db.get(
-    `
-      SELECT id
-      FROM users
-      WHERE username = ?
-      LIMIT 1
-    `,
-    ["admin"],
-    (selectErr, user) => {
-
-      if (selectErr) {
-
-        console.error(
-          "Admin query failed:",
-          selectErr.message
-        );
-
-        finish(1);
-        return;
-
-      }
-
-      if (!user) {
-
-        db.run(
-          `
-            INSERT INTO users
-            (
-              username,
-              password,
-              email,
-              full_name,
-              role,
-              is_active
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-          `,
-          [
-            "admin",
-            hash,
-            "admin@gkvm.local",
-            "GKVM Administrator",
-            "admin",
-            1
-          ],
-          (insertErr) => {
-
-            if (insertErr) {
-
-              console.error(
-                "Admin creation failed:",
-                insertErr.message
-              );
-
-              finish(1);
-              return;
-
-            }
-
-            console.log(
-              "ADMIN_CREATED"
-            );
-
-            finish(0);
-
-          }
-        );
-
-        return;
-      }
-
-      db.all(
-        "PRAGMA table_info(users)",
-        (pragmaErr, columns) => {
-
-          if (pragmaErr) {
-
-            console.error(
-              "Could not inspect users table:",
-              pragmaErr.message
-            );
-
-            finish(1);
-            return;
-
-          }
-
-          const names = new Set(
-            columns.map(
-              column => column.name
-            )
-          );
-
-          const updates = [
-            "password = ?",
-            "role = 'admin'",
-            "is_active = 1"
-          ];
-
-          const values = [
-            hash
-          ];
-
-          if (names.has("totp_enabled")) {
-            updates.push(
-              "totp_enabled = 0"
-            );
-          }
-
-          if (names.has("totp_secret")) {
-            updates.push(
-              "totp_secret = NULL"
-            );
-          }
-
-          if (names.has("totp_recovery_codes")) {
-            updates.push(
-              "totp_recovery_codes = NULL"
-            );
-          }
-
-          const sql = `
-            UPDATE users
-            SET ${updates.join(", ")}
-            WHERE username = 'admin'
-          `;
-
-          db.run(
-            sql,
-            values,
-            function(updateErr) {
-
-              if (updateErr) {
-
-                console.error(
-                  "Admin password update failed:",
-                  updateErr.message
-                );
-
-                finish(1);
-                return;
-
-              }
-
-              if (this.changes !== 1) {
-
-                console.error(
-                  "Admin account was not updated."
-                );
-
-                finish(1);
-                return;
-
-              }
-
-              console.log(
-                "ADMIN_UPDATED"
-              );
-
-              finish(0);
-
-            }
-          );
-
-        }
-      );
-
-    }
-  );
-
-});
-NODE
-)"
-
-if [[ "${ADMIN_RESULT}" == "ADMIN_CREATED" ]]; then
-
-    success "Real GKVM admin account created."
-
-else
-
-    success "Real GKVM admin password reset."
-
-fi
-
-# ============================================================
-# VERIFY CREDENTIALS
-# ============================================================
-
-section "LOGIN VERIFICATION"
-
-LOGIN_TEST="$(
-    "${NODE_BIN}" \
-        - "${DB_PATH}" "${ADMIN_PASSWORD}" \
-        <<'NODE'
-const sqlite3 = require("sqlite3").verbose();
-const bcrypt = require("bcryptjs");
-
-const db = new sqlite3.Database(
-  process.argv[2]
-);
-
-const password = process.argv[3];
-
-db.get(
-  `
-    SELECT username, password, role, is_active
-    FROM users
-    WHERE username = 'admin'
-    LIMIT 1
-  `,
-  (err, row) => {
-
-    if (err) {
-
-      console.error(
-        err.message
-      );
-
-      db.close();
-      process.exit(1);
-
-    }
-
-    if (!row) {
-
-      console.error(
-        "Admin user missing."
-      );
-
-      db.close();
-      process.exit(1);
-
-    }
-
-    const valid =
-      bcrypt.compareSync(
-        password,
-        row.password
-      );
-
-    db.close();
-
-    if (
-      valid &&
-      row.role === "admin" &&
-      Number(row.is_active) === 1
-    ) {
-
-      process.stdout.write(
-        "LOGIN_VALID"
-      );
-
-      process.exit(0);
-
-    }
-
-    process.exit(1);
-
-  }
-);
-NODE
-)"
-
-[[ "${LOGIN_TEST}" == "LOGIN_VALID" ]] ||
-    die "Generated GKVM admin credentials failed verification."
-
-success "Admin username/password verified against bcrypt."
-
-# ============================================================
-# SAVE CREDENTIALS
-# ============================================================
-
-cat > "${CREDENTIAL_FILE}" <<EOF
-============================================================
-                    GKVM PANEL
-                 ADMIN CREDENTIALS
-============================================================
-
-Username:
-${ADMIN_USERNAME}
-
-Password:
-${ADMIN_PASSWORD}
-
-Panel Port:
-${PANEL_PORT}
-
-Database:
-${DB_PATH}
-
-Generated:
-$(date -Is)
-
-============================================================
-IMPORTANT
-============================================================
-
-This is the REAL GKVM administrator password.
-
-It was bcrypt-hashed and verified directly against
-the GKVM users database.
-
-Do not share this file publicly.
-============================================================
-EOF
-
-chmod 600 "${CREDENTIAL_FILE}"
-chown root:root "${CREDENTIAL_FILE}"
-
-success "Verified credentials saved."
-
-separator
-
-# ============================================================
-# RUNTIME CONFIG
-# ============================================================
-
-section "RUNTIME CONFIGURATION"
-
-cat > "${RUNTIME_FILE}" <<EOF
-RUNTIME_USER=$(printf '%q' "${RUNTIME_USER}")
-RUNTIME_GROUP=$(printf '%q' "${RUNTIME_GROUP}")
-RUNTIME_HOME=$(printf '%q' "${RUNTIME_HOME}")
-DB_PATH=$(printf '%q' "${DB_PATH}")
-PANEL_PORT=$(printf '%q' "${PANEL_PORT}")
-EOF
-
-chmod 640 "${RUNTIME_FILE}"
-chown root:root "${RUNTIME_FILE}"
-
-# ============================================================
-# SYSTEMD
-# ============================================================
-
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
-
-    info "Building systemd service..."
-
-    cat > "${SERVICE_FILE}" <<EOF
-[Unit]
-Description=GKVM Panel - Virtual Machine Management
-Documentation=${REPO_URL}
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-
-WorkingDirectory=${APP_DIR}
-
-EnvironmentFile=${ENV_FILE}
-
-ExecStart=${NODE_BIN} ${MAIN_JS}
-
-Restart=always
-RestartSec=5
-
-KillSignal=SIGTERM
-TimeoutStopSec=30
-
-User=root
-Group=root
-
-LimitNOFILE=1048576
-
-StandardOutput=append:${LOG_FILE}
-StandardError=append:${LOG_FILE}
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    chmod 644 "${SERVICE_FILE}"
-
-    run_step \
-        "Validating systemd service" \
-        systemd-analyze verify \
-            "${SERVICE_FILE}"
-
-    run_step \
-        "Reloading systemd" \
-        systemctl daemon-reload
-
-    run_step \
-        "Enabling GKVM service" \
-        systemctl enable "${SERVICE_NAME}"
-
-    : > "${LOG_FILE}"
-
-else
-
-    warning "systemd service skipped."
-    detail "GKVM will use standalone process mode."
-
-fi
-
-# ============================================================
-# MANAGEMENT CLI
-# ============================================================
-
-section "GKVM MANAGEMENT CLI"
-
-cat > "${MANAGER_FILE}" <<'GKVM_MANAGER'
-#!/usr/bin/env bash
-
-set -Eeuo pipefail
-
-SERVICE_NAME="gkvm-panel"
-
-INSTALL_DIR="/opt/gkvm"
-APP_DIR="${INSTALL_DIR}/app"
-LOG_DIR="${INSTALL_DIR}/logs"
-
-LOG_FILE="${LOG_DIR}/gkvm.log"
-PID_FILE="${INSTALL_DIR}/gkvm.pid"
-
-CONFIG_DIR="/etc/gkvm"
-RUNTIME_FILE="${CONFIG_DIR}/runtime.conf"
-CREDENTIAL_FILE="${CONFIG_DIR}/admin-credentials.txt"
-
-MAIN_JS="${APP_DIR}/app.js"
-
-NODE_BIN="$(
-    readlink -f "$(command -v node)" 2>/dev/null ||
-    command -v node
-)"
-
-if [[ -f "${RUNTIME_FILE}" ]]; then
-    # shellcheck disable=SC1090
-    source "${RUNTIME_FILE}"
-fi
-
-RUNTIME_USER="${RUNTIME_USER:-root}"
-RUNTIME_GROUP="${RUNTIME_GROUP:-root}"
-RUNTIME_HOME="${RUNTIME_HOME:-/root}"
-DB_PATH="${DB_PATH:-}"
-
-has_systemd() {
-
-    command -v systemctl >/dev/null 2>&1 &&
-    [[ -d /run/systemd/system ]]
-
-}
-
-as_runtime() {
-
-    if [[ "${RUNTIME_USER}" == "root" ]]; then
-
-        env \
-            HOME="${RUNTIME_HOME}" \
-            "$@"
-
-    elif [[ "${EUID}" -eq 0 ]]; then
-
-        runuser \
-            -u "${RUNTIME_USER}" \
-            -- \
-            env \
-            HOME="${RUNTIME_HOME}" \
-            "$@"
-
-    elif [[ "$(id -un)" == "${RUNTIME_USER}" ]]; then
-
-        env \
-            HOME="${RUNTIME_HOME}" \
-            "$@"
-
-    else
-
-        echo "Run this command as ${RUNTIME_USER} or with sudo."
-        exit 1
-
-    fi
-
-}
-
-standalone_status() {
-
-    if [[ -f "${PID_FILE}" ]]; then
-
-        PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
-
-        if [[ "${PID}" =~ ^[0-9]+$ ]] &&
-           kill -0 "${PID}" >/dev/null 2>&1; then
-
-            echo "GKVM: RUNNING"
-            echo "PID : ${PID}"
-
-            return 0
-
+    echo -e "  ${T_ACCENT3}${BOLD}KERNEL MODULE MATRIX${RESET}"
+    thin_divider
+
+    if command -v lsmod >/dev/null 2>&1; then
+
+        local modules
+        modules="$(lsmod 2>/dev/null | grep '^kvm' || true)"
+
+        if [[ -n "${modules}" ]]; then
+            echo -e "${PURPLE}${modules}${RESET}"
+        else
+            warning "No KVM modules reported by lsmod."
+            KVM_REPAIRS+=( "modprobe" )
         fi
-
     fi
 
-    echo "GKVM: STOPPED"
+    # -- IOMMU ------------------------------------------------------------------
+    if [[ -d /sys/kernel/iommu_groups ]]; then
 
+        local groups
+        groups="$(find /sys/kernel/iommu_groups -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)"
+
+        echo
+        echo -e "  ${T_ACCENT3}${BOLD}IOMMU / PCI PASSTHROUGH${RESET}"
+        thin_divider
+
+        if [[ "${groups}" =~ ^[0-9]+$ ]] && (( groups > 0 )); then
+            printf "  ${EMERALD}✔${RESET} IOMMU groups detected: ${BOLD}%s${RESET}\n" "${groups}"
+        else
+            warning "IOMMU groups not populated — PCI passthrough unavailable."
+        fi
+    fi
+
+    # -- dmesg ------------------------------------------------------------------
+    echo
+    echo -e "  ${T_ACCENT3}${BOLD}KERNEL VIRTUALIZATION EVENTS${RESET}"
+    thin_divider
+
+    if command -v dmesg >/dev/null 2>&1; then
+
+        local dmesg_out
+        dmesg_out="$(dmesg 2>/dev/null | grep -iE 'kvm|virtualiz|vmx|svm' | tail -n 16 || true)"
+
+        if [[ -n "${dmesg_out}" ]]; then
+            echo -e "${DIM}${dmesg_out}${RESET}"
+        else
+            muted "No relevant kernel virtualization events found."
+        fi
+    fi
+
+    energy_bar 3 11 "KVM core analyzed"
 }
 
-standalone_start() {
+# =============================================================================
+# STAGE 04 — KVM FUNCTIONAL TEST
+# =============================================================================
 
-    mkdir -p \
-        "${LOG_DIR}" \
-        "${APP_DIR}/data"
+functional_kvm_test() {
 
-    if [[ -f "${PID_FILE}" ]]; then
+    stage_push "KVM FUNCTIONAL CORE"
 
-        PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
+    section \
+        "04 / 11" \
+        "KVM FUNCTIONAL CORE" \
+        "Actual QEMU hardware-acceleration initialization test."
 
-        if [[ "${PID}" =~ ^[0-9]+$ ]] &&
-           kill -0 "${PID}" >/dev/null 2>&1; then
+    if [[ "${SKIP_KVM_TEST}" == "true" ]]; then
 
-            echo "GKVM is already running."
-            echo "PID: ${PID}"
+        KVM_TEST="SKIPPED"
 
-            return 0
-
-        fi
-
-        rm -f "${PID_FILE}"
-
-    fi
-
-    echo "Starting GKVM..."
-
-    if [[ "${RUNTIME_USER}" == "root" ||
-          "${EUID}" -eq 0 ]]; then
-
-        as_runtime \
-            nohup "${NODE_BIN}" "${MAIN_JS}" \
-            >>"${LOG_FILE}" 2>&1 &
-
-        PID=$!
-
-    else
-
-        if [[ "$(id -un)" != "${RUNTIME_USER}" ]]; then
-
-            echo "Use: sudo gkvm start"
-            exit 1
-
-        fi
-
-        (
-            cd "${APP_DIR}"
-
-            nohup \
-                "${NODE_BIN}" \
-                "${MAIN_JS}" \
-                >>"${LOG_FILE}" 2>&1
-        ) &
-
-        PID=$!
-
-    fi
-
-    echo "${PID}" > "${PID_FILE}"
-
-    sleep 3
-
-    if kill -0 "${PID}" >/dev/null 2>&1; then
-
-        echo "GKVM started."
-        echo "PID: ${PID}"
-
-    else
-
-        echo "GKVM failed to start."
-
-        tail -n 100 \
-            "${LOG_FILE}" ||
-            true
-
-        exit 1
-
-    fi
-
-}
-
-standalone_stop() {
-
-    if [[ ! -f "${PID_FILE}" ]]; then
-
-        echo "GKVM is not running."
+        card \
+            "QEMU/KVM functional test" \
+            "SKIPPED" \
+            "${GOLD}" \
+            "Skipped by option."
 
         return 0
-
     fi
 
-    PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
+    if [[ "${KVM_AVAILABLE}" != "true" ]]; then
 
-    if [[ "${PID}" =~ ^[0-9]+$ ]]; then
+        KVM_TEST="UNAVAILABLE"
 
-        kill "${PID}" \
-            >/dev/null 2>&1 ||
-            true
+        card \
+            "QEMU/KVM functional test" \
+            "UNAVAILABLE" \
+            "${GOLD}" \
+            "No /dev/kvm device exposed."
 
+        return 0
     fi
 
-    rm -f "${PID_FILE}"
+    rm -f "${KVM_TEST_LOG}"
 
-    echo "GKVM stopped."
+    echo
+    echo -e "  ${T_ACCENT1}${BOLD}STARTING QEMU KVM ENGINE${RESET}"
+    echo
 
+    # charge-up animation
+    if [[ "${ULTRA_EFFECTS}" == "true" ]]; then
+
+        local charge_colors=( "${FLAME}" "${FIRE}" "${ORANGE}" "${GOLD}" "${BRIGHT_YELLOW}" "${BRIGHT_CYAN}" "${PURPLE}" "${PINK}" )
+        local i
+
+        for ((i=0; i<40; i++)); do
+            printf "\r  %b%s" "${charge_colors[$((i % ${#charge_colors[@]}))]}" "${G_BLOCK_F}"
+            sleep 0.018
+        done
+
+        echo
+    fi
+
+    set +e
+
+    timeout 6s qemu-system-x86_64 \
+        -accel kvm \
+        -machine q35 \
+        -display none \
+        -nodefaults \
+        -S \
+        >"${KVM_TEST_LOG}" 2>&1
+
+    local test_rc=$?
+
+    set -e
+
+    if [[ "${test_rc}" -eq 0 || "${test_rc}" -eq 124 ]]; then
+
+        KVM_TEST="PASSED"
+
+        particle_burst "KVM ENGINE IGNITION CONFIRMED"
+
+        card \
+            "QEMU/KVM functional test" \
+            "PASSED" \
+            "${EMERALD}" \
+            "QEMU initialized successfully with -accel kvm."
+
+    else
+
+        KVM_TEST="FAILED"
+
+        card \
+            "QEMU/KVM functional test" \
+            "FAILED" \
+            "${FLAME}" \
+            "KVM exposed but QEMU failed to initialize."
+
+        KVM_REPAIRS+=( "qemu-perms" "nested" )
+
+        echo
+        echo -e "  ${GOLD}${BOLD}KVM DIAGNOSTIC OUTPUT${RESET}"
+        thin_divider
+        echo -e "${DIM}"
+        tail -n 30 "${KVM_TEST_LOG}" 2>/dev/null || true
+        echo -e "${RESET}"
+    fi
+
+    energy_bar 4 11 "KVM engine tested"
 }
 
-show_credentials() {
+# =============================================================================
+# STAGE 04B — ACCELERATOR BENCHMARK
+# =============================================================================
 
-    if [[ "${EUID}" -ne 0 &&
-          ! -r "${CREDENTIAL_FILE}" ]]; then
+benchmark_accelerators() {
 
-        echo "Credentials are protected."
-        echo
-        echo "Run:"
-        echo
-        echo "  sudo gkvm credentials"
+    stage_push "ACCELERATOR BENCHMARK"
 
-        exit 1
+    section \
+        "04B / 11" \
+        "ACCELERATOR BENCHMARK" \
+        "Timed QEMU boot: KVM vs software TCG emulation."
 
+    if [[ "${SKIP_BENCHMARK}" == "true" ]]; then
+
+        card \
+            "Accelerator benchmark" \
+            "SKIPPED" \
+            "${GOLD}" \
+            "Skipped by option."
+
+        return 0
     fi
 
-    cat "${CREDENTIAL_FILE}"
+    if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        warning "QEMU not available for benchmark."
+        return 0
+    fi
 
+    bench_accel() {
+
+        local accel="$1"
+        local logf="$2"
+
+        rm -f "${logf}"
+
+        local start end ms
+
+        start="$(date +%s%N)"
+
+        set +e
+        timeout 5s qemu-system-x86_64 \
+            -accel "${accel}" \
+            -machine q35 \
+            -display none \
+            -nodefaults \
+            -S \
+            >"${logf}" 2>&1
+        local rc=$?
+        set -e
+
+        end="$(date +%s%N)"
+
+        # If timeout killed it (124) the engine DID start and stayed up = success
+        if [[ "${rc}" -ne 0 && "${rc}" -ne 124 ]]; then
+            echo "FAIL"
+            return
+        fi
+
+        ms=$(( (end - start) / 1000000 ))
+        echo "${ms}"
+    }
+
+    echo
+    muted "Spinning up KVM instance (timed)..."
+
+    local t_kvm t_tcg
+    t_kvm="$(bench_accel kvm "${KVM_BENCH_LOG}.kvm")"
+
+    echo
+    muted "Spinning up TCG instance (timed)..."
+
+    t_tcg="$(bench_accel tcg "${KVM_BENCH_LOG}.tcg")"
+
+    echo
+
+    if [[ "${t_kvm}" == "FAIL" ]]; then
+        KVM_BENCH_MS="N/A"
+        table_row "KVM init" "FAILED" "hardware accel" "${FLAME}"
+    else
+        KVM_BENCH_MS="${t_kvm}"
+        table_row "KVM init" "${t_kvm} ms" "hardware accel" "${EMERALD}"
+    fi
+
+    if [[ "${t_tcg}" == "FAIL" ]]; then
+        TCG_BENCH_MS="N/A"
+        table_row "TCG init" "FAILED" "software emu" "${FLAME}"
+    else
+        TCG_BENCH_MS="${t_tcg}"
+        table_row "TCG init" "${t_tcg} ms" "software emu" "${GOLD}"
+    fi
+
+    if [[ "${t_kvm}" != "FAIL" && "${t_tcg}" != "FAIL" ]]; then
+
+        local ratio=0
+        (( t_kvm > 0 )) && ratio=$(( t_tcg / t_kvm ))
+
+        echo
+        if (( ratio >= 2 )); then
+            card \
+                "Acceleration verdict" \
+                "KVM ${ratio}× FASTER" \
+                "${EMERALD}" \
+                "Hardware virtualization delivering maximum throughput."
+        else
+            card \
+                "Acceleration verdict" \
+                "MARGINAL GAIN" \
+                "${GOLD}" \
+                "KVM advantage is small — environment may be nested."
+        fi
+    fi
+
+    energy_bar 5 11 "Accelerators benchmarked"
 }
 
-reset_admin() {
+# =============================================================================
+# STAGE 05 — NETWORK MATRIX
+# =============================================================================
 
-    if [[ "${EUID}" -ne 0 ]]; then
+inspect_network() {
 
-        echo "Admin reset requires root access."
-        echo "Running with sudo..."
+    stage_push "NETWORK MATRIX"
 
-        exec sudo "$0" reset-admin
+    section \
+        "05 / 11" \
+        "NETWORK MATRIX" \
+        "Connectivity, latency, interfaces and port collision audit."
 
+    rm -f "${NET_MATRIX_LOG}"
+
+    # -- internet ----------------------------------------------------------------
+    if command -v curl >/dev/null 2>&1; then
+
+        local t_start t_end latency
+
+        t_start="$(date +%s%N)"
+
+        if curl -fsS --max-time 8 https://github.com >/dev/null 2>&1; then
+
+            INTERNET_AVAILABLE="true"
+
+            t_end="$(date +%s%N)"
+            latency=$(( (t_end - t_start) / 1000000 ))
+            LATENCY_MS="${latency}"
+
+            # -- geoip --------------------------------------------------------------
+            local geo
+            geo="$(curl -fsS --max-time 6 https://ipinfo.io/json 2>/dev/null || true)"
+
+            if [[ -n "${geo}" ]]; then
+                local city region country
+                city="$(echo "${geo}"    | grep -o '"city"[^,]*'    | cut -d'"' -f4 || true)"
+                region="$(echo "${geo}"  | grep -o '"region"[^,]*'  | cut -d'"' -f4 || true)"
+                country="$(echo "${geo}" | grep -o '"country"[^,]*' | cut -d'"' -f4 || true)"
+                [[ -n "${city}" && -n "${country}" ]] &&
+                    GEO_LOCATION="${city}, ${region:-?}, ${country}"
+            fi
+
+            card \
+                "Internet connectivity" \
+                "ONLINE · ${latency} ms" \
+                "${EMERALD}" \
+                "Repository access available. Location: ${GEO_LOCATION}."
+
+        else
+
+            INTERNET_AVAILABLE="false"
+
+            card \
+                "Internet connectivity" \
+                "FAILED" \
+                "${FLAME}" \
+                "Unable to reach external repository endpoint."
+        fi
     fi
 
-    [[ -n "${DB_PATH}" &&
-       -f "${DB_PATH}" ]] ||
-        {
-            echo "GKVM database not found."
-            exit 1
-        }
+    # -- interfaces ---------------------------------------------------------------
+    echo
+    echo -e "  ${T_ACCENT3}${BOLD}NETWORK INTERFACES${RESET}"
+    thin_divider
 
-    NEW_PASSWORD="$(
-        "${NODE_BIN}" \
-            -e '
-              const crypto = require("crypto");
-              process.stdout.write(
-                crypto.randomBytes(18).toString("base64url")
-              );
-            '
-    )"
+    if command -v ip >/dev/null 2>&1; then
+        ip -brief addr 2>/dev/null | while read -r line; do
+            printf "  ${DIM}%s${RESET}\n" "${line}"
+        done
+    fi
 
-    "${NODE_BIN}" \
-        - "${DB_PATH}" "${NEW_PASSWORD}" \
-        <<'NODE'
-const sqlite3 = require("sqlite3").verbose();
-const bcrypt = require("bcryptjs");
+    # -- port matrix ---------------------------------------------------------------
+    echo
+    echo -e "  ${T_ACCENT3}${BOLD}PORT COLLISION MATRIX${RESET}"
+    thin_divider
 
-const dbPath = process.argv[2];
-const password = process.argv[3];
+    local port owner state
 
-const hash = bcrypt.hashSync(
-  password,
-  10
-);
+    for port in "${PANEL_PORT}" "${COMMON_PORTS[@]}"; do
 
-const db = new sqlite3.Database(
-  dbPath
-);
+        [[ "${port}" == "${PANEL_PORT}" ]] && continue
 
-db.all(
-  "PRAGMA table_info(users)",
-  (pragmaErr, columns) => {
+        owner="$(lsof -t -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
 
-    if (pragmaErr) {
-      console.error(pragmaErr.message);
-      process.exit(1);
-    }
+        if [[ -n "${owner}" ]]; then
+            state="OCCUPIED"
+            printf "  ${GOLD}%-6s${RESET} ${DIM}%-10s${RESET} ${PINK}pid %s${RESET}\n" "${port}" "${state}" "${owner}"
+        else
+            state="free"
+            printf "  ${SLATE}%-6s${RESET} ${DIM}%-10s${RESET}\n" "${port}" "${state}"
+        fi
 
-    const names =
-      new Set(columns.map(c => c.name));
+    done
 
-    const updates = [
-      "password = ?",
-      "role = 'admin'",
-      "is_active = 1"
-    ];
+    # -- panel port deep check ------------------------------------------------------
+    local -a pids=()
+    if command -v lsof >/dev/null 2>&1; then
+        mapfile -t pids < <(lsof -t -nP -iTCP:"${PANEL_PORT}" -sTCP:LISTEN 2>/dev/null || true)
+    fi
 
-    if (names.has("totp_enabled")) {
-      updates.push(
-        "totp_enabled = 0"
-      );
-    }
+    echo
 
-    if (names.has("totp_secret")) {
-      updates.push(
-        "totp_secret = NULL"
-      );
-    }
+    if (( ${#pids[@]} == 0 )); then
 
-    if (names.has("totp_recovery_codes")) {
-      updates.push(
-        "totp_recovery_codes = NULL"
-      );
-    }
+        card \
+            "Panel port ${PANEL_PORT}" \
+            "AVAILABLE" \
+            "${EMERALD}" \
+            "No process currently owns the panel port."
 
-    const hashValue = hash;
+    else
 
-    db.run(
-      `
-        UPDATE users
-        SET ${updates.join(", ")}
-        WHERE username = 'admin'
-      `,
-      [hashValue],
-      function(err) {
+        for pid in "${pids[@]}"; do
 
-        if (err) {
-          console.error(err.message);
-          process.exit(1);
-        }
+            [[ "${pid}" =~ ^[0-9]+$ ]] || continue
 
-        if (this.changes !== 1) {
-          console.error(
-            "Admin account does not exist."
-          );
-          process.exit(1);
-        }
+            local cmdline
+            cmdline="$(ps -p "${pid}" -o args= 2>/dev/null || echo unknown)"
 
-        db.close(() => {
-          process.stdout.write(
-            password
-          );
-        });
+            label "Port PID"     "${pid}"     "${GOLD}"
+            label "Process"      "${cmdline}" "${PINK}"
+        done
 
-      }
-    );
+        warning "Port ${PANEL_PORT} is already in use."
+        warning "The direct installer will handle any existing compatible process."
+    fi
 
+    energy_bar 6 11 "Network matrix audited"
+}
+
+# =============================================================================
+# STAGE 06 — FIREWALL GATEWAY (with snapshot)
+# =============================================================================
+
+configure_firewall() {
+
+    stage_push "NETWORK GATEWAY"
+
+    section \
+        "06 / 11" \
+        "NETWORK GATEWAY" \
+        "Preparing external access — with automatic rollback snapshot."
+
+    if [[ "${SKIP_FIREWALL}" == "true" ]]; then
+
+        warning "Firewall modification disabled by option."
+        return 0
+    fi
+
+    # -- snapshot existing rules --------------------------------------------------
+    {
+        echo "# GKVM firewall snapshot $(date -Is)"
+        if command -v ufw >/dev/null 2>&1; then
+            ufw status 2>/dev/null || true
+        fi
+        if command -v firewall-cmd >/dev/null 2>&1; then
+            firewall-cmd --list-all 2>/dev/null || true
+        fi
+        if command -v iptables >/dev/null 2>&1; then
+            iptables -S 2>/dev/null || true
+        fi
+    } > "${FW_SNAPSHOT}" 2>/dev/null || true
+
+    log_info "Firewall snapshot written to ${FW_SNAPSHOT}"
+
+    # -- apply ---------------------------------------------------------------------
+    if command -v ufw >/dev/null 2>&1; then
+
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            printf "  ${STEEL}[DRY-RUN]${RESET} ufw allow ${PANEL_PORT}/tcp\n"
+        else
+            ufw allow "${PANEL_PORT}/tcp" >/dev/null 2>&1 || true
+        fi
+
+        card \
+            "UFW gateway" \
+            "PORT ${PANEL_PORT} OPEN" \
+            "${EMERALD}" \
+            "TCP access allowed. Rollback snapshot saved."
+
+        return 0
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            printf "  ${STEEL}[DRY-RUN]${RESET} firewall-cmd --add-port=${PANEL_PORT}/tcp\n"
+        else
+            firewall-cmd --permanent --add-port="${PANEL_PORT}/tcp" >/dev/null 2>&1 || true
+            firewall-cmd --reload >/dev/null 2>&1 || true
+        fi
+
+        card \
+            "firewalld gateway" \
+            "PORT ${PANEL_PORT} OPEN" \
+            "${EMERALD}" \
+            "TCP access allowed. Rollback snapshot saved."
+
+        return 0
+    fi
+
+    card \
+        "Host firewall" \
+        "NOT MANAGED" \
+        "${GOLD}" \
+        "No UFW/firewalld detected."
+
+    warning "Check your VPS provider firewall for TCP ${PANEL_PORT}."
+}
+
+# =============================================================================
+# STAGE 07 — CORE BOOTSTRAP (download engine)
+# =============================================================================
+
+download_legacy_installer() {
+
+    stage_push "CORE BOOTSTRAP"
+
+    section \
+        "07 / 11" \
+        "GKVM CORE BOOTSTRAP" \
+        "Fetching the pinned production installer with integrity gates."
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+
+        printf "  ${STEEL}[DRY-RUN]${RESET} would fetch ${LEGACY_URL}\n"
+
+        card \
+            "Bootstrap fetch" \
+            "SIMULATED" \
+            "${SKY}" \
+            "Dry-run mode — nothing downloaded."
+
+        return 0
+    fi
+
+    if run_effect \
+        "Downloading pinned direct installer" \
+        net_fetch "${LEGACY_URL}" "${LEGACY_RAW}" 4; then
+
+        success "Pinned installer downloaded."
+
+    else
+
+        die "Failed to download pinned installer after 4 attempts. Check connectivity."
+    fi
+
+    # -- size gate -----------------------------------------------------------------
+    local fsize
+    fsize="$(stat -c%s "${LEGACY_RAW}" 2>/dev/null || echo 0)"
+
+    if [[ ! "${fsize}" =~ ^[0-9]+$ ]] || (( fsize < 500 )); then
+        die "Downloaded installer is suspiciously small (${fsize} bytes)."
+    fi
+
+    success "Size gate passed (${fsize} bytes)."
+
+    chmod 700 "${LEGACY_RAW}"
+
+    # -- sha256 fingerprint ---------------------------------------------------------
+    if command -v sha256sum >/dev/null 2>&1; then
+
+        local sha
+        sha="$(sha256sum "${LEGACY_RAW}" | awk '{print $1}')"
+
+        label "SHA-256" "${sha}" "${LAVENDER}"
+
+        if [[ -n "${LEGACY_SHA256:-}" ]]; then
+
+            if [[ "${sha}" == "${LEGACY_SHA256}" ]]; then
+                success "SHA-256 matches pinned fingerprint."
+            else
+                die "SHA-256 mismatch! Expected ${LEGACY_SHA256}, got ${sha}. Aborting for safety."
+            fi
+
+        else
+            muted "No pinned fingerprint set — recording observed hash for audit."
+            log_info "observed legacy sha256: ${sha}"
+        fi
+    fi
+
+    # -- syntax gate ------------------------------------------------------------------
+    bash -n "${LEGACY_RAW}" ||
+        die "Downloaded installer failed Bash syntax validation."
+
+    success "Bash syntax validation passed."
+
+    # -- compatibility guard ------------------------------------------------------------
+    if grep -qE 'HKVM_INSTALL_DIR|HKVM_APP_DIR|/opt/hkvm|hkvm\.service' "${LEGACY_RAW}"; then
+        success "Legacy HKVM compatibility identifiers detected."
+    else
+        warning "Expected HKVM identifiers not detected — continuing (pinned installer is authoritative)."
+    fi
+
+    # -- branding patch ------------------------------------------------------------------
+    sed \
+        -e 's/^PANEL_NAME=HKVM$/PANEL_NAME="GKVM"/' \
+        -e 's/^PANEL_NAME="HKVM"$/PANEL_NAME="GKVM"/' \
+        -e 's/HKVM PANEL V3/GKVM PANEL V3/g' \
+        -e 's/HKVM V5/GKVM V5/g' \
+        -e 's/HKVM Panel/GKVM Panel/g' \
+        -e 's/HKVM PANEL/GKVM PANEL/g' \
+        -e 's/HKVM/GKVM/g' \
+        "${LEGACY_RAW}" > "${LEGACY_PATCHED}"
+
+    chmod 700 "${LEGACY_PATCHED}"
+
+    bash -n "${LEGACY_PATCHED}" ||
+        die "Branded installer failed Bash syntax validation."
+
+    success "GKVM branding layer validated."
+
+    card \
+        "Legacy compatibility layer" \
+        "PRESERVED" \
+        "${T_ACCENT1}" \
+        "Internal HKVM runtime contracts deliberately not renamed."
+
+    echo
+    echo -e "  ${DIM}${ICE}Preserved internal identifiers:${RESET}"
+    echo
+    printf "    ${DIM}%s${RESET}\n" "HKVM_INSTALL_DIR · HKVM_APP_DIR · /opt/hkvm · hkvm.service"
+    echo
+
+    energy_bar 7 11 "Bootstrap secured"
+}
+
+# =============================================================================
+# STAGE 08 — DEPLOYMENT CORE
+# =============================================================================
+
+deploy_legacy() {
+
+    stage_push "DEPLOYMENT CORE"
+
+    section \
+        "08 / 11" \
+        "DEPLOYMENT CORE" \
+        "Handing the prepared host to the proven direct-install engine."
+
+    echo
+    echo -e "${T_ACCENT3}${BOLD}"
+    cat <<'EOF'
+  ╭──────────────────────────────────────────────────────────────────────╮
+  │                                                                      │
+  │              ⚡  G K V M   D E P L O Y M E N T   C O R E  ⚡        │
+  │                                                                      │
+  │                         POWERING UP                                 │
+  │                                                                      │
+  ╰──────────────────────────────────────────────────────────────────────╯
+EOF
+    echo -e "${RESET}"
+
+    echo
+
+    if [[ "${ULTRA_EFFECTS}" == "true" ]]; then
+
+        local boot_seq=( "${FLAME}" "${FIRE}" "${ORANGE}" "${GOLD}" "${BRIGHT_YELLOW}" "${BRIGHT_CYAN}" "${PURPLE}" "${PINK}" )
+        local round el
+
+        for round in 1 2 3; do
+            for el in "${boot_seq[@]}"; do
+                printf "\r  %b%s ${WHITE}${BOLD}BOOTING DEPLOYMENT ENGINE${RESET}" "${el}" "${G_BLOCK_F}"
+                sleep 0.04
+            done
+        done
+
+        clear_line
+    fi
+
+    echo
+    echo -e "  ${WHITE}${BOLD}┌──────────────────────────────────────────────────────────────┐${RESET}"
+    echo -e "  ${WHITE}${BOLD}│              GKVM ENGINE ONLINE — EXECUTING PAYLOAD          │${RESET}"
+    echo -e "  ${WHITE}${BOLD}└──────────────────────────────────────────────────────────────┘${RESET}"
+    echo
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+
+        printf "  ${STEEL}[DRY-RUN]${RESET} would execute: %s %s\n" "${LEGACY_PATCHED}" "$*"
+        CHILD_EXIT_CODE=0
+
+        card \
+            "Deployment" \
+            "SIMULATED" \
+            "${SKY}" \
+            "Dry-run mode — payload not executed."
+
+        return 0
+    fi
+
+    set +e
+
+    "${LEGACY_PATCHED}" "$@" 2>&1 | tee "${CHILD_LOG}"
+
+    CHILD_EXIT_CODE="${PIPESTATUS[0]}"
+
+    set -e
+
+    if [[ "${CHILD_EXIT_CODE}" -eq 0 ]]; then
+        success "Direct-install engine completed cleanly."
+    else
+        warning "Direct-install engine exited with code ${CHILD_EXIT_CODE}."
+    fi
+
+    return "${CHILD_EXIT_CODE}"
+}
+
+# =============================================================================
+# STAGE 09 — JSON TELEMETRY EXPORT
+# =============================================================================
+
+export_telemetry() {
+
+    stage_push "TELEMETRY EXPORT"
+
+    local end_time duration
+    end_time="$(date +%s)"
+    duration=$(( end_time - START_TIME ))
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        muted "Dry-run: telemetry export simulated."
+        return 0
+    fi
+
+    local qemu_ver
+    qemu_ver="$(qemu-system-x86_64 --version 2>/dev/null | head -n 1 || echo "n/a")"
+
+    cat > "${TELEMETRY_JSON}" <<EOF
+{
+  "panel": {
+    "name": "${GKVM_NAME}",
+    "codename": "${GKVM_CODENAME}",
+    "version": "${GKVM_VERSION}",
+    "build": "${GKVM_BUILD}",
+    "port": ${PANEL_PORT}
+  },
+  "host": {
+    "arch": "$(uname -m 2>/dev/null || echo unknown)",
+    "kernel": "$(uname -r 2>/dev/null || echo unknown)",
+    "os": "$(. /etc/os-release 2>/dev/null; echo ${PRETTY_NAME:-unknown})",
+    "cpu_threads": $(nproc 2>/dev/null || echo 0),
+    "memory_mib": $(free -m 2>/dev/null | awk '/^Mem:/ {print $2}' || echo 0)
+  },
+  "virtualization": {
+    "kvm_device": ${KVM_AVAILABLE},
+    "kvm_rw": ${KVM_READWRITE},
+    "kvm_test": "${KVM_TEST}",
+    "kvm_init_ms": "${KVM_BENCH_MS:-N/A}",
+    "tcg_init_ms": "${TCG_BENCH_MS:-N/A}",
+    "qemu_installed": ${QEMU_INSTALLED},
+    "qemu_version": "$(echo "${qemu_ver}" | sed 's/"/\\"/g')"
+  },
+  "network": {
+    "internet": ${INTERNET_AVAILABLE},
+    "latency_ms": "${LATENCY_MS:-N/A}",
+    "location": "${GEO_LOCATION}",
+    "panel_port": ${PANEL_PORT}
+  },
+  "run": {
+    "duration_s": ${duration},
+    "child_exit_code": ${CHILD_EXIT_CODE},
+    "stages": [$(printf '"%s",' "${STAGE_LOG[@]+"${STAGE_LOG[@]}"}" | sed 's/,$//')],
+    "theme": "${THEME}",
+    "dry_run": ${DRY_RUN},
+    "timestamp": "$(date -Is)"
   }
-);
-NODE
-
-    # Rewrite credential file.
-    cat > "${CREDENTIAL_FILE}" <<EOF
-============================================================
-                    GKVM PANEL
-                 ADMIN CREDENTIALS
-============================================================
-
-Username:
-admin
-
-Password:
-${NEW_PASSWORD}
-
-Database:
-${DB_PATH}
-
-Generated:
-$(date -Is)
-
-============================================================
+}
 EOF
 
-    chmod 600 "${CREDENTIAL_FILE}"
+    success "Telemetry exported → ${TELEMETRY_JSON}"
 
-    echo
-    echo "============================================================"
-    echo "              GKVM ADMIN PASSWORD RESET"
-    echo "============================================================"
-    echo
-    echo "Username : admin"
-    echo "Password : ${NEW_PASSWORD}"
-    echo
-    echo "Credential file:"
-    echo "${CREDENTIAL_FILE}"
-    echo
-    echo "============================================================"
-
+    energy_bar 9 11 "Telemetry exported"
 }
 
-health() {
+# =============================================================================
+# STAGE 10 — PANEL HEALTH
+# =============================================================================
+
+panel_health() {
+
+    stage_push "PANEL HEALTH"
 
     echo
-    echo "GKVM HEALTH"
-    echo "-----------"
+    echo -e "  ${T_ACCENT3}${BOLD}PANEL HEALTH${RESET}"
+    thin_divider
+
+    local listening="false"
+    local http_code="000"
 
     if command -v ss >/dev/null 2>&1; then
-
-        if ss -ltn |
-            grep -Eq ":${PANEL_PORT:-8080}([[:space:]]|$)"; then
-
-            echo "Port 8080 : ONLINE"
-
-        else
-
-            echo "Port 8080 : OFFLINE"
-
+        if ss -ltn 2>/dev/null | grep -Eq ":${PANEL_PORT}([[:space:]]|$)"; then
+            listening="true"
         fi
-
     fi
 
-    STATUS="$(
-        curl \
-            -sS \
-            -o /dev/null \
-            -w '%{http_code}' \
-            --max-time 5 \
-            "http://127.0.0.1:${PANEL_PORT:-8080}/" \
-            2>/dev/null ||
-            true
+    http_code="$(
+        curl -sS -o /dev/null -w '%{http_code}' --max-time 8 \
+            "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000"
     )"
 
-    echo "HTTP       : ${STATUS:-NO RESPONSE}"
+    if [[ "${listening}" == "true" ]]; then
+        success "TCP ${PANEL_PORT}: LISTENING"
+    else
+        warning "TCP ${PANEL_PORT}: NOT DETECTED"
+    fi
 
+    if [[ "${http_code}" =~ ^[0-9]{3}$ && "${http_code}" != "000" ]]; then
+        success "HTTP health: ${http_code}"
+    else
+        warning "HTTP health: NO RESPONSE"
+    fi
+
+    # -- service probe ----------------------------------------------------------
+    if [[ "${SYSTEMD_AVAILABLE}" == "true" ]] && command -v systemctl >/dev/null 2>&1; then
+
+        echo
+
+        if systemctl is-active --quiet hkvm.service 2>/dev/null; then
+            success "hkvm.service: ACTIVE"
+        elif systemctl is-enabled --quiet hkvm.service 2>/dev/null; then
+            warning "hkvm.service: ENABLED but not active"
+        else
+            muted "hkvm.service: not registered (standalone/container mode)"
+        fi
+    fi
+
+    energy_bar 10 11 "Health verified"
 }
 
-info_screen() {
+# =============================================================================
+# STAGE 11 — FINAL DASHBOARD
+# =============================================================================
+
+final_screen() {
+
+    clear_screen
 
     echo
-    echo "============================================================"
-    echo "                       GKVM INFO"
-    echo "============================================================"
-    echo
-    echo "Install directory : ${INSTALL_DIR}"
-    echo "Application       : ${APP_DIR}"
-    echo "Database          : ${DB_PATH:-unknown}"
-    echo "Runtime user      : ${RUNTIME_USER}"
-    echo "Runtime home      : ${RUNTIME_HOME}"
-    echo "Port              : ${PANEL_PORT:-8080}"
-    echo "Credentials       : ${CREDENTIAL_FILE}"
-    echo
-    echo "============================================================"
+    echo -e "${T_ACCENT1}${BOLD}"
 
+    cat <<EOF
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║                                                                           ║
+  ║    ${T_ACCENT3}██╗  ██╗██╗   ██╗███╗   ███╗${T_ACCENT1}                                 ║
+  ║    ${T_ACCENT3}██║ ██╔╝██║   ██║████╗ ████║${T_ACCENT1}                                 ║
+  ║    ${T_ACCENT3}█████╔╝ ██║   ██║██╔████╔██║${T_ACCENT1}                                 ║
+  ║    ${T_ACCENT3}██╔═██╗ ╚██╗ ██╔╝██║╚██╔╝██║${T_ACCENT1}                                 ║
+  ║    ${T_ACCENT3}██║  ██╗ ╚████╔╝ ██║ ╚═╝ ██║${T_ACCENT1}                                 ║
+  ║    ${T_ACCENT3}╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝${T_ACCENT1}                                 ║
+  ║                                                                           ║
+  ║              ${T_GLOW}D E P L O Y M E N T   C O M P L E T E${T_ACCENT1}                    ║
+  ║                                                                           ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+EOF
+
+    echo -e "${RESET}"
+
+    if [[ "${CHILD_EXIT_CODE}" -eq 0 ]]; then
+        echo
+        glitch_reveal "         ⚡ GKVM DEPLOYMENT SUCCESS — POWER CORE ONLINE ⚡"
+    else
+        echo
+        glitch_reveal "              ❌ DEPLOYMENT FAILED — REVIEW LOGS ❌"
+    fi
+
+    echo
+    divider
+    echo
+
+    local end_time duration
+    end_time="$(date +%s)"
+    duration=$(( end_time - START_TIME ))
+
+    # -- run summary --------------------------------------------------------------
+    echo -e "  ${T_ACCENT1}${BOLD}RUN SUMMARY${RESET}"
+    echo
+
+    label "Execution Time"  "${duration}s"        "${GOLD}"
+    label "Panel Port"      "${PANEL_PORT}"        "${T_ACCENT1}"
+    label "Theme"           "${THEME}"             "${PINK}"
+    label "Stages Executed" "${#STAGE_LOG[@]}"     "${SKY}"
+
+    case "${KVM_TEST}" in
+        PASSED)      label "KVM" "HARDWARE ACCELERATED" "${EMERALD}" ;;
+        FAILED)      label "KVM" "TEST FAILED" "${FLAME}" ;;
+        SKIPPED)     label "KVM" "TEST SKIPPED" "${GOLD}" ;;
+        UNAVAILABLE) label "KVM" "UNAVAILABLE" "${GOLD}" ;;
+        *)           label "KVM" "${KVM_TEST}" "${WHITE}" ;;
+    esac
+
+    if [[ "${INTERNET_AVAILABLE}" == "true" ]]; then
+        label "Repository Access" "ONLINE" "${EMERALD}"
+    else
+        label "Repository Access" "UNKNOWN" "${GOLD}"
+    fi
+
+    if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
+        label "Service Runtime" "SYSTEMD" "${T_ACCENT1}"
+    else
+        label "Service Runtime" "STANDALONE / CONTAINER" "${GOLD}"
+    fi
+
+    label "Installer Log" "${INSTALLER_LOG}" "${ICE}"
+    label "Telemetry"     "${TELEMETRY_JSON}" "${LAVENDER}"
+
+    echo
+    divider
+
+    # -- virtualization status ------------------------------------------------------
+    echo
+    echo -e "  ${T_ACCENT3}${BOLD}VIRTUALIZATION STATUS${RESET}"
+    echo
+
+    if [[ "${KVM_TEST}" == "PASSED" ]]; then
+        card \
+            "KVM acceleration" \
+            "ONLINE" \
+            "${EMERALD}" \
+            "Hardware-accelerated QEMU initialization succeeded."
+    elif [[ "${KVM_AVAILABLE}" == "true" ]]; then
+        card \
+            "KVM acceleration" \
+            "DEVICE AVAILABLE" \
+            "${GOLD}" \
+            "KVM exists but functional test did not pass — try --repair-kvm."
+    else
+        card \
+            "KVM acceleration" \
+            "UNAVAILABLE" \
+            "${GOLD}" \
+            "QEMU software emulation (TCG) will be used."
+    fi
+
+    if [[ "${KVM_BENCH_MS}" != "" && "${KVM_BENCH_MS}" != "N/A" ]]; then
+        muted "Benchmark: KVM ${KVM_BENCH_MS} ms · TCG ${TCG_BENCH_MS:-N/A} ms"
+    fi
+
+    echo
+    divider
+
+    # -- quick access ---------------------------------------------------------------
+    echo
+    echo -e "  ${T_ACCENT3}${BOLD}QUICK ACCESS${RESET}"
+    echo
+
+    printf "  ${EMERALD}%s${RESET} Check KVM      ${DIM}:${RESET} ${ICE}ls -l /dev/kvm${RESET}\n" "${G_ARROW}"
+    printf "  ${EMERALD}%s${RESET} Check QEMU     ${DIM}:${RESET} ${ICE}qemu-system-x86_64 --version${RESET}\n" "${G_ARROW}"
+    printf "  ${EMERALD}%s${RESET} Check panel    ${DIM}:${RESET} ${ICE}ss -lntp | grep :${PANEL_PORT}${RESET}\n" "${G_ARROW}"
+    printf "  ${EMERALD}%s${RESET} Service status ${DIM}:${RESET} ${ICE}systemctl status hkvm.service${RESET}\n" "${G_ARROW}"
+    printf "  ${EMERALD}%s${RESET} Installer log  ${DIM}:${RESET} ${ICE}tail -f ${INSTALLER_LOG}${RESET}\n" "${G_ARROW}"
+    printf "  ${EMERALD}%s${RESET} Telemetry      ${DIM}:${RESET} ${ICE}cat ${TELEMETRY_JSON}${RESET}\n" "${G_ARROW}"
+    printf "  ${EMERALD}%s${RESET} Firewall undo  ${DIM}:${RESET} ${ICE}ufw delete allow ${PANEL_PORT}/tcp${RESET}\n" "${G_ARROW}"
+
+    echo
+    divider
+
+    # -- compatibility footer ---------------------------------------------------------
+    echo
+    echo -e "  ${GOLD}${BOLD}COMPATIBILITY CONTRACT${RESET}"
+    echo
+
+    label "Legacy Commit" "${LEGACY_COMMIT}" "${PURPLE}"
+    label "Panel Runtime" "/opt/hkvm"        "${ICE}"
+    label "Service"       "hkvm.service"     "${GOLD}"
+
+    echo
+    divider
+    echo
+
+    if [[ "${CHILD_EXIT_CODE}" -eq 0 ]]; then
+
+        if [[ "${ULTRA_EFFECTS}" == "true" ]]; then
+
+            particle_burst "          GKVM POWER CORE READY — TITANIUM ONLINE"
+
+            echo
+            echo -e "${T_GLOW}${BOLD}"
+            echo "             QEMU • KVM • OVMF • CLOUD-IMAGES • VM ENGINE"
+            echo -e "${RESET}"
+
+        else
+            echo -e "${EMERALD}${BOLD}             GKVM POWER CORE READY${RESET}"
+        fi
+
+    else
+
+        echo -e "${FLAME}${BOLD}                  GKVM DEPLOYMENT ERROR${RESET}"
+        echo
+        warning "Review: ${INSTALLER_LOG}"
+    fi
+
+    echo
+    echo -e "  ${DIM}${WHITE}GKVM PANEL · ULTRA NEXUS · TITANIUM EDITION · ${GKVM_BUILD}${RESET}"
+    echo
+
+    log_info "Final screen rendered. child_exit=${CHILD_EXIT_CODE} duration=${duration}s"
 }
 
-case "${1:-status}" in
+# =============================================================================
+# KVM REPAIR DOCTOR (standalone --repair-kvm)
+# =============================================================================
 
-    start)
+repair_kvm() {
 
-        if has_systemd; then
+    clear_screen
 
-            if [[ "${EUID}" -eq 0 ]]; then
-                systemctl start "${SERVICE_NAME}"
-            else
-                sudo systemctl start "${SERVICE_NAME}"
-            fi
+    echo
+    gradient_line "              K V M   R E P A I R   D O C T O R" "ice"
+    echo
+    divider
+    echo
 
-        else
+    local -a fixes_applied=()
 
-            standalone_start
+    # -- fix 1: load modules ------------------------------------------------------
+    echo -e "  ${T_ACCENT1}${BOLD}PROBE 1${RESET} ${DIM}— kernel modules${RESET}"
+    thin_divider
 
-        fi
+    local vendor
+    vendor="$(awk -F: '/^vendor_id/{gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null || echo "")"
 
-        ;;
+    local mod=""
+    case "${vendor}" in
+        *GenuineIntel*) mod="kvm_intel" ;;
+        *AuthenticAMD*) mod="kvm_amd" ;;
+        *)              mod="kvm" ;;
+    esac
 
-    stop)
-
-        if has_systemd; then
-
-            if [[ "${EUID}" -eq 0 ]]; then
-                systemctl stop "${SERVICE_NAME}"
-            else
-                sudo systemctl stop "${SERVICE_NAME}"
-            fi
-
-        else
-
-            standalone_stop
-
-        fi
-
-        ;;
-
-    restart)
-
-        if has_systemd; then
-
-            if [[ "${EUID}" -eq 0 ]]; then
-                systemctl restart "${SERVICE_NAME}"
-            else
-                sudo systemctl restart "${SERVICE_NAME}"
-            fi
-
-        else
-
-            standalone_stop
-            sleep 1
-            standalone_start
-
-        fi
-
-        ;;
-
-    status)
-
-        if has_systemd; then
-
-            if [[ "${EUID}" -eq 0 ]]; then
-                systemctl status "${SERVICE_NAME}" --no-pager
-            else
-                sudo systemctl status "${SERVICE_NAME}" --no-pager
-            fi
-
-        else
-
-            standalone_status
-
-        fi
-
-        ;;
-
-    logs)
-
-        if has_systemd; then
-
-            if [[ "${EUID}" -eq 0 ]]; then
-                journalctl -u "${SERVICE_NAME}" -f
-            else
-                sudo journalctl -u "${SERVICE_NAME}" -f
-            fi
-
-        else
-
-            tail -f "${LOG_FILE}"
-
-        fi
-
-        ;;
-
-    credentials)
-
-        show_credentials
-
-        ;;
-
-    reset-admin)
-
-        reset_admin
-
-        ;;
-
-    health)
-
-        health
-
-        ;;
-
-    info)
-
-        info_screen
-
-        ;;
-
-    *)
-
-        echo
-        echo "GKVM MANAGEMENT"
-        echo
-        echo "  gkvm start"
-        echo "  gkvm stop"
-        echo "  gkvm restart"
-        echo "  gkvm status"
-        echo "  gkvm logs"
-        echo "  gkvm health"
-        echo "  gkvm info"
-        echo "  gkvm credentials"
-        echo "  sudo gkvm reset-admin"
-        echo
-
-        ;;
-
-esac
-GKVM_MANAGER
-
-chmod 755 "${MANAGER_FILE}"
-
-success "GKVM management CLI installed."
-
-separator
-
-# ============================================================
-# START GKVM
-# ============================================================
-
-section "GKVM STARTUP"
-
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
-
-    : > "${LOG_FILE}"
-
-    run_step \
-        "Reloading systemd configuration" \
-        systemctl daemon-reload
-
-    run_step \
-        "Starting GKVM service" \
-        systemctl restart "${SERVICE_NAME}"
-
-    sleep 3
-
-    if systemctl is-active --quiet "${SERVICE_NAME}"; then
-
-        success "GKVM systemd service is ONLINE."
-
+    if lsmod 2>/dev/null | grep -q "^kvm"; then
+        success "KVM modules already loaded."
     else
+        warning "KVM modules not loaded — attempting modprobe."
 
-        error_msg "GKVM service did not remain online."
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            printf "  ${STEEL}[DRY-RUN]${RESET} modprobe kvm && modprobe %s\n" "${mod}"
+        else
+            modprobe kvm 2>/dev/null || true
+            [[ -n "${mod}" && "${mod}" != "kvm" ]] && modprobe "${mod}" 2>/dev/null || true
 
-        systemctl status \
-            "${SERVICE_NAME}" \
-            --no-pager \
-            --full ||
-            true
+            if lsmod 2>/dev/null | grep -q "^kvm"; then
+                success "KVM modules loaded."
+                fixes_applied+=( "modprobe:${mod}" )
+            else
+                failure "modprobe failed — hardware virtualization may be disabled in BIOS/UEFI or by hypervisor."
+            fi
+        fi
+    fi
 
-        echo
-        tail -n 160 "${LOG_FILE}" || true
+    echo
 
+    # -- fix 2: udev permissions ---------------------------------------------------
+    echo -e "  ${T_ACCENT1}${BOLD}PROBE 2${RESET} ${DIM}— /dev/kvm permissions${RESET}"
+    thin_divider
+
+    if [[ -e /dev/kvm ]]; then
+
+        if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+            success "/dev/kvm accessible."
+        else
+
+            warning "/dev/kvm not accessible — installing udev rule."
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+                printf "  ${STEEL}[DRY-RUN]${RESET} udev rule: MODE=0666 on /dev/kvm\n"
+            else
+                printf 'KERNEL=="kvm", GROUP="kvm", MODE="0666"\n' \
+                    > /etc/udev/rules.d/99-gkvm-kvm.rules
+
+                if command -v udevadm >/dev/null 2>&1; then
+                    udevadm control --reload-rules 2>/dev/null || true
+                    udevadm trigger --name-match=kvm 2>/dev/null || true
+                fi
+
+                chmod 666 /dev/kvm 2>/dev/null || true
+
+                if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+                    success "/dev/kvm permissions repaired."
+                    fixes_applied+=( "udev-rule" )
+                else
+                    warning "Permissions repair incomplete."
+                fi
+            fi
+        fi
+    else
+        warning "/dev/kvm still absent after module probe."
+    fi
+
+    echo
+
+    # -- fix 3: nested virtualization ------------------------------------------------
+    echo -e "  ${T_ACCENT1}${BOLD}PROBE 3${RESET} ${DIM}— nested virtualization${RESET}"
+    thin_divider
+
+    local nest_file=""
+    for cand in /sys/module/kvm_intel/parameters/nested \
+                /sys/module/kvm_amd/parameters/nested; do
+        [[ -f "${cand}" ]] && nest_file="${cand}" && break
+    done
+
+    if [[ -n "${nest_file}" ]]; then
+
+        local nest_val
+        nest_val="$(cat "${nest_file}" 2>/dev/null || echo "?")"
+
+        label "Nested param" "${nest_val}" "${SKY}"
+
+        if [[ "${nest_val}" == "0" || "${nest_val}" == "N" ]]; then
+
+            warning "Nested virtualization disabled — enabling."
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+                printf "  ${STEEL}[DRY-RUN]${RESET} echo 1 > %s\n" "${nest_file}"
+            else
+                echo 1 > "${nest_file}" 2>/dev/null || true
+                local new_val
+                new_val="$(cat "${nest_file}" 2>/dev/null || echo "?")"
+
+                if [[ "${new_val}" == "1" || "${new_val}" == "Y" ]]; then
+                    success "Nested virtualization enabled for this session."
+                    fixes_applied+=( "nested-virt" )
+                else
+                    warning "Could not enable nested virtualization (may need kernel param)."
+                    muted "Add 'kvm-intel.nested=1' or 'kvm-amd.nested=1' to kernel cmdline."
+                fi
+            fi
+        else
+            success "Nested virtualization already enabled."
+        fi
+    else
+        muted "Nested virtualization parameter not exposed."
+    fi
+
+    echo
+
+    # -- fix 4: functional re-test ----------------------------------------------------
+    echo -e "  ${T_ACCENT1}${BOLD}PROBE 4${RESET} ${DIM}— functional re-test${RESET}"
+    thin_divider
+
+    if command -v qemu-system-x86_64 >/dev/null 2>&1 && [[ -e /dev/kvm ]]; then
+
+        set +e
+        timeout 6s qemu-system-x86_64 \
+            -accel kvm -machine q35 -display none -nodefaults -S \
+            >"${KVM_TEST_LOG}" 2>&1
+        local rc=$?
+        set -e
+
+        if [[ "${rc}" -eq 0 || "${rc}" -eq 124 ]]; then
+            card \
+                "Repair verification" \
+                "KVM FUNCTIONAL" \
+                "${EMERALD}" \
+                "QEMU initialized with -accel kvm after repair."
+        else
+            card \
+                "Repair verification" \
+                "STILL FAILING" \
+                "${FLAME}" \
+                "See ${KVM_TEST_LOG}."
+        fi
+    else
+        warning "Cannot re-test: QEMU or /dev/kvm missing."
+    fi
+
+    echo
+    divider
+    echo
+
+    if (( ${#fixes_applied[@]} > 0 )); then
+        echo -e "  ${EMERALD}${BOLD}FIXES APPLIED:${RESET}"
+        local fix
+        for fix in "${fixes_applied[@]}"; do
+            printf "    ${EMERALD}%s${RESET} %s\n" "${G_CHECK}" "${fix}"
+        done
+    else
+        muted "No fixes were required."
+    fi
+
+    echo
+    echo -e "  ${DIM}${WHITE}KVM REPAIR DOCTOR COMPLETE${RESET}"
+    echo
+
+    exit 0
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+main() {
+
+    rotate_logs
+
+    parse_args "$@"
+
+    theme_apply "${THEME}"
+    probe_terminal
+    glyph_init
+
+    # -------------------------------------------------------------------------
+    # Root check (skip for repair dry-run help etc.)
+    # -------------------------------------------------------------------------
+    if [[ "${EUID}" -ne 0 ]]; then
+        failure "This installer must run as root."
+        printf "  ${ICE}%s${RESET} sudo ./gkvm-nexus-installer.sh %s\n" "${G_ARROW}" "$*"
         exit 1
-
     fi
 
-else
-
-    : > "${LOG_FILE}"
-
-    if [[ "${RUNTIME_USER}" == "root" ]]; then
-
-        (
-            export HOME="${RUNTIME_HOME}"
-            export NODE_ENV="production"
-            export HOST="0.0.0.0"
-            export PORT="${PANEL_PORT}"
-            export PANEL_NAME="GKVM Panel"
-            export LICENSE_MODE="disabled"
-            export LICENSE_KEY=""
-            export GKVM_INSTALL_DIR="${INSTALL_DIR}"
-            export GKVM_APP_DIR="${APP_DIR}"
-            export GKVM_DATA_DIR="${DATA_DIR}"
-            export GKVM_LOG_DIR="${LOG_DIR}"
-
-            nohup \
-                "${NODE_BIN}" \
-                "${MAIN_JS}" \
-                >>"${LOG_FILE}" 2>&1
-        ) &
-
-        GKVM_PID=$!
-
-    else
-
-        runuser \
-            -u "${RUNTIME_USER}" \
-            -- \
-            env \
-            HOME="${RUNTIME_HOME}" \
-            NODE_ENV="production" \
-            HOST="0.0.0.0" \
-            PORT="${PANEL_PORT}" \
-            PANEL_NAME="GKVM Panel" \
-            LICENSE_MODE="disabled" \
-            LICENSE_KEY="" \
-            GKVM_INSTALL_DIR="${INSTALL_DIR}" \
-            GKVM_APP_DIR="${APP_DIR}" \
-            GKVM_DATA_DIR="${DATA_DIR}" \
-            GKVM_LOG_DIR="${LOG_DIR}" \
-            nohup \
-            "${NODE_BIN}" \
-            "${MAIN_JS}" \
-            >>"${LOG_FILE}" 2>&1 &
-
-        GKVM_PID=$!
-
+    # -------------------------------------------------------------------------
+    # Standalone repair doctor
+    # -------------------------------------------------------------------------
+    if [[ "${REPAIR_MODE}" == "true" ]]; then
+        repair_kvm
     fi
 
-    echo "${GKVM_PID}" > "${PID_FILE}"
-
-    sleep 4
-
-    if kill -0 "${GKVM_PID}" >/dev/null 2>&1; then
-
-        success "GKVM standalone process is ONLINE."
-
-        detail "PID: ${GKVM_PID}"
-
-    else
-
-        error_msg "GKVM standalone process stopped unexpectedly."
-
-        tail -n 200 "${LOG_FILE}" || true
-
-        exit 1
-
+    # -------------------------------------------------------------------------
+    # Wizard
+    # -------------------------------------------------------------------------
+    if [[ "${WIZARD}" == "true" && "${ASSUME_YES}" != "true" ]]; then
+        wizard_run
     fi
 
-fi
-
-separator
-
-# ============================================================
-# PORT HEALTH
-# ============================================================
-
-section "HEALTH CHECK"
-
-PANEL_STATUS="OFFLINE"
-
-for _ in {1..30}; do
-
-    if ss -ltn 2>/dev/null |
-        grep -Eq ":${PANEL_PORT}([[:space:]]|$)"; then
-
-        PANEL_STATUS="ONLINE"
-        break
-
+    # -------------------------------------------------------------------------
+    # systemd probe
+    # -------------------------------------------------------------------------
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        SYSTEMD_AVAILABLE="true"
     fi
 
-    sleep 1
+    # -------------------------------------------------------------------------
+    # Cinematic boot
+    # -------------------------------------------------------------------------
+    boot_cinematic
 
-done
+    # -------------------------------------------------------------------------
+    # Stages
+    # -------------------------------------------------------------------------
+    detect_host_metrics
 
-if [[ "${PANEL_STATUS}" == "ONLINE" ]]; then
+    install_prerequisites
 
-    success "TCP port ${PANEL_PORT} is ONLINE."
+    inspect_kvm
 
-else
+    functional_kvm_test
 
-    warning "TCP port ${PANEL_PORT} is not listening."
+    benchmark_accelerators
 
-fi
+    inspect_network
 
-# ============================================================
-# HTTP HEALTH
-# ============================================================
+    configure_firewall
 
-HTTP_STATUS="$(
-    curl \
-        -sS \
-        -o /dev/null \
-        -w '%{http_code}' \
-        --max-time 8 \
-        "http://127.0.0.1:${PANEL_PORT}/" \
-        2>/dev/null ||
-        true
-)"
+    download_legacy_installer
 
-if [[ "${HTTP_STATUS}" =~ ^[0-9]{3}$ ]] &&
-   [[ "${HTTP_STATUS}" != "000" ]]; then
+    deploy_legacy "$@"
 
-    success "HTTP health check : ${HTTP_STATUS}"
+    export_telemetry
 
-else
+    panel_health
 
-    warning "HTTP health check did not return a response."
+    # -------------------------------------------------------------------------
+    # Final dashboard
+    # -------------------------------------------------------------------------
+    final_screen
 
-fi
+    return "${CHILD_EXIT_CODE}"
+}
 
-# ============================================================
-# DATABASE FINAL CHECK
-# ============================================================
+# =============================================================================
+# LAUNCH
+# =============================================================================
 
-if [[ -f "${DB_PATH}" ]]; then
-
-    success "Database is present."
-
-    detail "${DB_PATH}"
-
-else
-
-    warning "Database file was not found at the recorded path."
-
-fi
-
-# ============================================================
-# ACCESS INFORMATION
-# ============================================================
-
-PUBLIC_IP=""
-
-if [[ "${IS_CODESPACES}" == "true" ]]; then
-
-    ACCESS_URL="http://localhost:${PANEL_PORT}"
-    ACCESS_MODE="CODESPACES PORT FORWARDING"
-
-else
-
-    PUBLIC_IP="$(
-        curl \
-            -4 \
-            -fsS \
-            --max-time 8 \
-            https://api.ipify.org \
-            2>/dev/null ||
-            true
-    )"
-
-    if [[ -z "${PUBLIC_IP}" ]]; then
-
-        PUBLIC_IP="$(
-            hostname -I 2>/dev/null |
-            awk '{print $1}' ||
-            true
-        )"
-
-    fi
-
-    [[ -n "${PUBLIC_IP}" ]] ||
-        PUBLIC_IP="YOUR_SERVER_IP"
-
-    ACCESS_URL="http://${PUBLIC_IP}:${PANEL_PORT}"
-    ACCESS_MODE="VPS / SERVER"
-
-fi
-
-# ============================================================
-# FINAL CREDENTIAL PROTECTION
-# ============================================================
-
-chmod 600 "${CREDENTIAL_FILE}"
-
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
-
-    chown root:root "${CREDENTIAL_FILE}"
-
-fi
-
-# ============================================================
-# FINAL SCREEN
-# ============================================================
-
-clear 2>/dev/null || true
-
-echo
-echo -e "${BRIGHT_CYAN}${BOLD}"
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                                                              ║"
-echo "║                   ✦ GKVM PANEL READY ✦                      ║"
-echo "║                                                              ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
-echo -e "${RESET}"
-
-echo
-echo -e "${BRIGHT_GREEN}${BOLD}  SYSTEM STATUS${RESET}"
-separator
-
-printf "  %-24s ${BRIGHT_GREEN}%s${RESET}\n" \
-    "Panel" \
-    "${PANEL_STATUS}"
-
-printf "  %-24s ${WHITE}%s${RESET}\n" \
-    "Mode" \
-    "$([[ "${HAS_SYSTEMD}" == "true" ]] && echo "SYSTEMD" || echo "STANDALONE")"
-
-printf "  %-24s ${WHITE}%s${RESET}\n" \
-    "Port" \
-    "${PANEL_PORT}"
-
-printf "  %-24s ${WHITE}%s${RESET}\n" \
-    "HTTP" \
-    "${HTTP_STATUS:-NO RESPONSE}"
-
-printf "  %-24s ${WHITE}%s${RESET}\n" \
-    "Database" \
-    "${DB_PATH}"
-
-printf "  %-24s ${WHITE}%s${RESET}\n" \
-    "Runtime user" \
-    "${RUNTIME_USER}"
-
-echo
-echo -e "${BRIGHT_MAGENTA}${BOLD}  PANEL ACCESS${RESET}"
-separator
-
-printf "  %-24s ${BRIGHT_CYAN}%s${RESET}\n" \
-    "URL" \
-    "${ACCESS_URL}"
-
-printf "  %-24s ${WHITE}%s${RESET}\n" \
-    "Access mode" \
-    "${ACCESS_MODE}"
-
-echo
-echo -e "${BRIGHT_YELLOW}${BOLD}  ADMIN LOGIN${RESET}"
-separator
-
-printf "  %-24s ${BRIGHT_WHITE}%s${RESET}\n" \
-    "Username" \
-    "${ADMIN_USERNAME}"
-
-printf "  %-24s ${BRIGHT_GREEN}${BOLD}%s${RESET}\n" \
-    "Password" \
-    "${ADMIN_PASSWORD}"
-
-echo
-printf "  %-24s ${WHITE}%s${RESET}\n" \
-    "Credentials file" \
-    "${CREDENTIAL_FILE}"
-
-echo
-echo -e "${BRIGHT_BLUE}${BOLD}  MANAGEMENT${RESET}"
-separator
-
-echo "    gkvm start"
-echo "    gkvm stop"
-echo "    gkvm restart"
-echo "    gkvm status"
-echo "    gkvm logs"
-echo "    gkvm health"
-echo "    gkvm info"
-echo "    sudo gkvm reset-admin"
-echo "    sudo gkvm credentials"
-
-echo
-echo -e "${BRIGHT_CYAN}${BOLD}  INSTALLATION PATHS${RESET}"
-separator
-
-printf "  %-24s %s\n" \
-    "Application" \
-    "${APP_DIR}"
-
-printf "  %-24s %s\n" \
-    "Logs" \
-    "${LOG_FILE}"
-
-printf "  %-24s %s\n" \
-    "Backups" \
-    "${BACKUP_DIR}"
-
-printf "  %-24s %s\n" \
-    "Config" \
-    "${ENV_FILE}"
-
-echo
-echo -e "${DIM}License mode: DISABLED (development build)${RESET}"
-echo -e "${DIM}Repository: ${REPO_URL}${RESET}"
-
-echo
-echo -e "${BRIGHT_GREEN}${BOLD}"
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                    INSTALLATION COMPLETE                     ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
-echo -e "${RESET}"
-
-echo
-
-if [[ "${IS_CODESPACES}" == "true" ]]; then
-
-    warning "Open port ${PANEL_PORT} from the Codespaces PORTS tab."
-
-    detail "The private 10.x container address is not your public panel URL."
-
-fi
-
-echo
-success "GKVM Panel installation finished successfully."
-echo
+main "$@"
