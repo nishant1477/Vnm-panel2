@@ -24,9 +24,14 @@
 set -Eeuo pipefail
 
 readonly GKVM_NAME="GKVM Panel"
-readonly GKVM_VERSION="ULTRA EDITION 2026"
+readonly GKVM_VERSION="ULTRA EDITION 2026.09 • 3D DEPLOY CORE"
 readonly LEGACY_COMMIT="dd9db741e4fac2394a514bae2c0d4ef933e00540"
 readonly LEGACY_URL="https://raw.githubusercontent.com/stripathi02123-tech/Vnm-panel/${LEGACY_COMMIT}/install-direct.sh"
+readonly PANEL_ZIP_URL="https://raw.githubusercontent.com/nishant1477/Vnm-panel2/main/GKVM-panel.zip"
+readonly DIRECT_INSTALL_DIR="/opt/gkvm"
+readonly COMPAT_INSTALL_DIR="/opt/hkvm"
+readonly COMPAT_SERVICE="hkvm.service"
+readonly ADMIN_CREDENTIALS_FILE="/root/gkvm-admin.txt"
 readonly WORK_ROOT="/tmp/gkvm-installer-$$"
 readonly LEGACY_RAW="${WORK_ROOT}/legacy-install.sh"
 readonly LEGACY_PATCHED="${WORK_ROOT}/gkvm-install.sh"
@@ -66,6 +71,26 @@ rgb() { printf '\033[38;2;%d;%d;%dm' "$1" "$2" "$3"; }
 bgr() { printf '\033[48;2;%d;%d;%dm' "$1" "$2" "$3"; }
 
 TERM_WIDTH="$(tput cols 2>/dev/null || echo 88)"
+
+UTF8_UI="false"
+if command -v locale >/dev/null 2>&1; then
+  if [[ "$(locale charmap 2>/dev/null || true)" == "UTF-8" ]]; then
+    UTF8_UI="true"
+  fi
+fi
+if [[ ! -t 1 || "${TERM:-}" == "dumb" ]]; then
+  UTF8_UI="false"
+fi
+
+if [[ "${UTF8_UI}" == "true" ]]; then
+  BAR_FULL="█"
+  BAR_EMPTY="░"
+  SCAN_CHAR="·"
+else
+  BAR_FULL="#"
+  BAR_EMPTY="."
+  SCAN_CHAR="."
+fi
 (( TERM_WIDTH < 72 )) && TERM_WIDTH=72
 
 if [[ ! -t 1 || "${TERM:-}" == "dumb" ]]; then
@@ -82,7 +107,12 @@ exec > >(tee -a "${INSTALLER_LOG}") 2>&1
 # TERMINAL STATE / CLEANUP
 # =============================================================================
 
-hide_cursor() { [[ "${ANIMATION}" == "true" ]] && printf '\033[?25l'; }
+hide_cursor() {
+  if [[ "${ANIMATION}" == "true" ]]; then
+    printf '\033[?25l'
+  fi
+  return 0
+}
 show_cursor() { printf '\033[?25h'; }
 clear_screen() { clear 2>/dev/null || printf '\033[2J\033[H'; }
 move_home() { printf '\033[H'; }
@@ -199,7 +229,7 @@ holo_scan() {
   local width=58
   local i
   for ((i=0; i<width; i+=2)); do
-    printf '\r  %b%s%b' "${AQUA}" "$(printf '%*s' "$i" '' | tr ' ' '·')" "${RESET}"
+    printf '\r  %b%s%b' "${AQUA}" "$(printf '%*s' "$i" '' | tr ' ' "${SCAN_CHAR}")" "${RESET}"
     sleep 0.006
   done
   clear_line
@@ -207,15 +237,20 @@ holo_scan() {
 
 particle_burst() {
   [[ "${ULTRA_EFFECTS}" == "true" ]] || return 0
-  local -a p=("✦" "✧" "◆" "◇" "⬢" "⬡" "•" "·")
-  local -a c=("${BRIGHT_CYAN}" "${ICE}" "${PURPLE}" "${PINK}" "${GOLD}" "${BRIGHT_GREEN}" "${BRIGHT_YELLOW}" "${WHITE}")
-  local i idx
+  local -a p=("✦" "✧" "◆" "◇" "⬢" "⬡" "⚡" "•")
+  local -a c=("${BRIGHT_CYAN}" "${ICE}" "${BRIGHT_MAGENTA}" "${PINK}" "${PURPLE}" "${GOLD}" "${BRIGHT_YELLOW}" "${BRIGHT_GREEN}")
+  local i a b
   for ((i=0; i<32; i++)); do
-    idx=$((i % ${#p[@]}))
-    printf '\r  %b%s %b%s%b %b%s%b %b%s%b' "${c[$idx]}" "${p[$idx]}" "${c[$((idx+2)%8)]}" "${p[$((idx+2)%8)]}" "${RESET}" "${c[$((idx+4)%8)]}" "${p[$((idx+4)%8)]}" "${RESET}" "${DIM}" "GKVM POWER MATRIX${RESET}"
-    sleep 0.025
+    a=$(( i % 8 ))
+    b=$(( (a + 3) % 8 ))
+    printf '\r  %b%b%s%b  %b%b%s%b  %bGKVM POWER MATRIX%b' \
+      "${c[$a]}" "${BOLD}" "${p[$a]}" "${RESET}" \
+      "${c[$b]}" "${BOLD}" "${p[$b]}" "${RESET}" \
+      "${DIM}" "${RESET}"
+    sleep 0.018
   done
   clear_line
+  return 0
 }
 
 fire_animation() {
@@ -245,21 +280,32 @@ spark_animation() {
 plasma_bar() {
   local current="$1" total="$2" text="$3" width=48
   (( total < 1 )) && total=1
+  (( current < 0 )) && current=0
+  (( current > total )) && current="$total"
+
   local filled=$(( current * width / total ))
   local empty=$(( width - filled ))
   local fill="" blank=""
-  (( filled > 0 )) && fill="$(printf '%*s' "$filled" '' | tr ' ' '█')"
-  (( empty > 0 )) && blank="$(printf '%*s' "$empty" '' | tr ' ' '░')"
-  local pct=$(( current * 100 / total ))
-  local colors=("${BRIGHT_CYAN}" "${AQUA}" "${ICE}" "${PURPLE}" "${PINK}" "${GOLD}")
-  local shown="${fill}${blank}"
-  local out=""
-  local i ch idx
-  for ((i=0; i<${#shown}; i++)); do
-    ch="${shown:i:1}"; idx=$((i % ${#colors[@]})); out+="${colors[$idx]}${ch}"
+  local i idx ch
+  local -a colors=("${BRIGHT_CYAN}" "${AQUA}" "${ICE}" "${PURPLE}" "${PINK}" "${GOLD}")
+
+  for ((i=0; i<filled; i++)); do
+    idx=$(( i % ${#colors[@]} ))
+    fill+="${colors[$idx]}${BAR_FULL}"
   done
-  printf '\r  %b[%s%b] %b%3d%%%b %s%b' "${BRIGHT_CYAN}" "${out}" "${RESET}" "${GOLD}${BOLD}" "${pct}" "${RESET}" "${WHITE}" "${text}${RESET}"
-  (( current == total )) && echo
+  for ((i=0; i<empty; i++)); do
+    blank+="${DIM}${BAR_EMPTY}"
+  done
+
+  local pct=$(( current * 100 / total ))
+  printf '\r  %b[%b%s%b%s%b] %b%3d%%%b %s%b' \
+    "${BRIGHT_CYAN}" "${RESET}" "${fill}" "${RESET}" "${blank}" "${RESET}" \
+    "${GOLD}${BOLD}" "${pct}" "${RESET}" "${WHITE}" "${text}${RESET}"
+
+  if (( current == total )); then
+    printf '\n'
+  fi
+  return 0
 }
 
 # Keep original helper name as a compatibility alias.
@@ -409,7 +455,7 @@ install_vnm_panel_prerequisites() {
   section "01 / 08" "HOST FOUNDATION" "Installing virtualization prerequisites."
   run_effect "Refreshing package database" apt-get update -y
   energy_bar 1 6 "APT package database"
-  run_effect "Installing bootstrap utilities" apt-get install -y ca-certificates curl git file lsof procps iproute2 openssl build-essential python3 sqlite3 util-linux
+  run_effect "Installing bootstrap utilities" apt-get install -y ca-certificates curl git file lsof procps iproute2 openssl build-essential python3 sqlite3 util-linux unzip nodejs npm
   energy_bar 2 6 "System utilities"
   run_effect "Installing cloud-image tooling" apt-get install -y cloud-image-utils
   energy_bar 3 6 "Cloud image support"
@@ -504,14 +550,23 @@ functional_kvm_test() {
     local -a c=("${BRIGHT_RED}" "${FIRE}" "${ORANGE}" "${GOLD}" "${BRIGHT_YELLOW}" "${BRIGHT_CYAN}" "${PURPLE}" "${PINK}")
     local i idx
     for ((i=0; i<56; i++)); do
-      idx=$((i % ${#c[@]})); printf '\r  %b█%b' "${c[$idx]}" "${RESET}"; sleep 0.012
+      idx=$((i % ${#c[@]})); printf '\r  %b%s%b' "${c[$idx]}" "${BAR_FULL}" "${RESET}"; sleep 0.012
     done
     echo
   fi
 
   set +e
-  timeout 6s qemu-system-x86_64 -accel kvm -machine q35 -display none -nodefaults -S >"${KVM_TEST_LOG}" 2>&1
-  local test_rc=$?
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 6s qemu-system-x86_64 -accel kvm -machine q35 -display none -nodefaults -S >"${KVM_TEST_LOG}" 2>&1
+    local test_rc=$?
+  else
+    qemu-system-x86_64 -accel kvm -machine q35 -display none -nodefaults -S >"${KVM_TEST_LOG}" 2>&1 &
+    local qemu_pid=$!
+    sleep 2
+    kill "${qemu_pid}" >/dev/null 2>&1 || true
+    wait "${qemu_pid}" >/dev/null 2>&1
+    local test_rc=$?
+  fi
   set -e
 
   if [[ "${test_rc}" -eq 0 || "${test_rc}" -eq 124 ]]; then
@@ -588,34 +643,215 @@ configure_firewall() {
 
 download_legacy_installer() {
   section "07 / 08" "GKVM CORE BOOTSTRAP" "Fetching the pinned production installer."
-  run_effect "Downloading pinned VNM direct installer" curl -fsSL "${LEGACY_URL}" -o "${LEGACY_RAW}"
-  [[ -s "${LEGACY_RAW}" ]] || die "Pinned direct installer is empty."
-  chmod 700 "${LEGACY_RAW}"
-  bash -n "${LEGACY_RAW}" || die "Downloaded direct installer contains invalid Bash syntax."
-  success "Downloaded installer passed Bash syntax validation."
 
-  if grep -nE 'HKVM_INSTALL_DIR|HKVM_APP_DIR|/opt/hkvm|hkvm\.service' "${LEGACY_RAW}" >/dev/null 2>&1; then
-    success "Legacy HKVM compatibility identifiers detected."
+  LEGACY_AVAILABLE="false"
+
+  if run_effect "Downloading pinned VNM direct installer" curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 10 --max-time 120 "${LEGACY_URL}" -o "${LEGACY_RAW}"; then
+    if [[ -s "${LEGACY_RAW}" ]] && bash -n "${LEGACY_RAW}"; then
+      LEGACY_AVAILABLE="true"
+      chmod 700 "${LEGACY_RAW}"
+      success "Pinned legacy installer downloaded and syntax validated."
+
+      if grep -qE 'HKVM_INSTALL_DIR|HKVM_APP_DIR|/opt/hkvm|hkvm\.service' "${LEGACY_RAW}" 2>/dev/null; then
+        success "Legacy HKVM compatibility identifiers detected."
+      else
+        warning "Expected HKVM compatibility identifiers were not detected."
+      fi
+
+      sed \
+        -e 's/^PANEL_NAME=HKVM$/PANEL_NAME="GKVM"/' \
+        -e 's/^PANEL_NAME="HKVM"$/PANEL_NAME="GKVM"/' \
+        -e 's/HKVM PANEL V3/GKVM PANEL V3/g' \
+        -e 's/HKVM V5/GKVM V5/g' \
+        -e 's/HKVM Panel/GKVM Panel/g' \
+        -e 's/HKVM PANEL/GKVM PANEL/g' \
+        "${LEGACY_RAW}" > "${LEGACY_PATCHED}"
+
+      chmod 700 "${LEGACY_PATCHED}"
+      bash -n "${LEGACY_PATCHED}" || die "Branded direct installer failed Bash syntax validation."
+      success "GKVM branding layer validated without renaming runtime contracts."
+    else
+      warning "Legacy installer was downloaded but failed validation."
+    fi
   else
-    warning "Expected HKVM compatibility identifiers were not detected."
-    warning "Continuing because the pinned installer itself remains authoritative."
+    warning "Pinned legacy installer could not be downloaded. Direct GKVM archive installation will be used."
   fi
 
-  sed \
-    -e 's/^PANEL_NAME=HKVM$/PANEL_NAME="GKVM"/' \
-    -e 's/^PANEL_NAME="HKVM"$/PANEL_NAME="GKVM"/' \
-    -e 's/HKVM PANEL V3/GKVM PANEL V3/g' \
-    -e 's/HKVM V5/GKVM V5/g' \
-    -e 's/HKVM Panel/GKVM Panel/g' \
-    -e 's/HKVM PANEL/GKVM PANEL/g' \
-    "${LEGACY_RAW}" > "${LEGACY_PATCHED}"
+  card "Bootstrap source" \
+       "$( [[ "${LEGACY_AVAILABLE}" == "true" ]] && echo "LEGACY + FALLBACK" || echo "DIRECT ARCHIVE" )" \
+       "${BRIGHT_CYAN}" \
+       "GKVM will not stop after prerequisites; the panel deployment stage will still run."
+}
 
-  chmod 700 "${LEGACY_PATCHED}"
-  bash -n "${LEGACY_PATCHED}" || die "Branded direct installer failed Bash syntax validation."
-  success "GKVM branding layer validated."
-  card "Legacy compatibility layer" "PRESERVED" "${BRIGHT_CYAN}" "Internal HKVM runtime contracts were deliberately not renamed."
-  echo; printf '%b  Preserved internal identifiers:%b\n\n' "${DIM}${ICE}" "${RESET}"
-  printf '    %bHKVM_INSTALL_DIR%b\n    %bHKVM_APP_DIR%b\n    %b/opt/hkvm%b\n    %bhkvm.service%b\n' "${ICE}" "${RESET}" "${ICE}" "${RESET}" "${ICE}" "${RESET}" "${ICE}" "${RESET}"
+install_node_stack() {
+  command -v node >/dev/null 2>&1 || apt-get install -y nodejs
+  command -v npm >/dev/null 2>&1 || apt-get install -y npm
+  command -v unzip >/dev/null 2>&1 || apt-get install -y unzip
+  node --version
+  npm --version
+}
+
+find_panel_root() {
+  local base="$1"
+  local candidate
+  if [[ -f "${base}/app/package.json" || -f "${base}/app/app.js" ]]; then
+    printf '%s\n' "${base}/app"
+    return 0
+  fi
+  if [[ -f "${base}/package.json" || -f "${base}/app.js" ]]; then
+    printf '%s\n' "${base}"
+    return 0
+  fi
+  candidate="$(find "${base}" -maxdepth 4 -type f \( -name package.json -o -name app.js \) 2>/dev/null | head -n 1 | sed 's#/package.json$##; s#/app.js$##')"
+  [[ -n "${candidate}" ]] || return 1
+  printf '%s\n' "${candidate}"
+}
+
+reset_admin_credentials() {
+  local panel_root="$1"
+  local db="/root/.vnm/vnm.db"
+  local password hash node_bin
+
+  [[ -f "${db}" ]] || return 0
+  node_bin="$(command -v node || true)"
+  [[ -n "${node_bin}" ]] || return 0
+  [[ -f "${panel_root}/package.json" ]] || return 0
+
+  password="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9@#%+=_' | head -c 18)"
+  [[ -n "${password}" ]] || password="GKVM-$(date +%s)-Admin"
+
+  if ( cd "${panel_root}" && ADMIN_PASSWORD="${password}" GKVM_DB_PATH="${db}" node <<'NODE'
+const sqlite3 = require('sqlite3').verbose();
+let bcrypt;
+try { bcrypt = require('bcryptjs'); } catch (e) { process.exit(3); }
+const dbPath = process.env.GKVM_DB_PATH;
+const password = process.env.ADMIN_PASSWORD;
+const hash = bcrypt.hashSync(password, 10);
+const db = new sqlite3.Database(dbPath, err => {
+  if (err) { console.error(err.message); process.exit(1); }
+  db.run(`UPDATE users SET password=?, role='admin', is_active=1 WHERE username='admin'`, [hash], function(err2) {
+    if (err2) { console.error(err2.message); db.close(); process.exit(1); }
+    const finish = () => db.close(() => process.exit(0));
+    if (this.changes > 0) return finish();
+    db.run(`INSERT INTO users (username,password,email,role,is_active) VALUES ('admin',?,'admin@gkvm.local','admin',1)`, [hash], err3 => {
+      if (err3) { console.error(err3.message); db.close(); process.exit(1); }
+      finish();
+    });
+  });
+});
+NODE
+  ); then
+    cat >"${ADMIN_CREDENTIALS_FILE}" <<EOF
+GKVM PANEL ADMIN CREDENTIALS
+============================
+Username: admin
+Password: ${password}
+Database: ${db}
+Generated: $(date -Is)
+EOF
+    chmod 600 "${ADMIN_CREDENTIALS_FILE}"
+    success "GKVM admin password synchronized with the real SQLite database."
+    label "Admin credentials" "${ADMIN_CREDENTIALS_FILE}" "${GOLD}"
+  else
+    warning "Admin synchronization skipped because the panel database/dependencies were not ready yet."
+  fi
+}
+
+install_panel_archive() {
+  section "08A / 08" "DIRECT GKVM PANEL DEPLOYMENT" "Installing the actual panel archive when the legacy bootstrap is unavailable or incomplete."
+
+  install_node_stack
+
+  local zip="${WORK_ROOT}/GKVM-panel.zip"
+  local extract="${WORK_ROOT}/panel-extract"
+  mkdir -p "${extract}"
+
+  run_effect "Downloading GKVM panel archive" curl -fsSL --retry 4 --retry-delay 2 --connect-timeout 10 --max-time 180 "${PANEL_ZIP_URL}" -o "${zip}"
+  [[ -s "${zip}" ]] || die "GKVM panel archive is empty."
+
+  run_effect "Extracting GKVM panel archive" unzip -q -o "${zip}" -d "${extract}"
+
+  local root
+  root="$(find_panel_root "${extract}")" || die "Could not find package.json/app.js inside GKVM-panel.zip."
+
+  rm -rf "${DIRECT_INSTALL_DIR}"
+  mkdir -p "${DIRECT_INSTALL_DIR}"
+  cp -a "${root}/." "${DIRECT_INSTALL_DIR}/"
+
+  local app_root
+  app_root="$(find_panel_root "${DIRECT_INSTALL_DIR}")" || die "Installed archive does not contain a runnable Node panel."
+
+  run_effect "Installing GKVM Node dependencies" bash -c "cd '$app_root' && npm install --omit=dev --no-audit --no-fund"
+
+  mkdir -p /root/.vnm /root/vms
+
+  if [[ -e "${COMPAT_INSTALL_DIR}" && ! -L "${COMPAT_INSTALL_DIR}" ]]; then
+    local backup_compat="${COMPAT_INSTALL_DIR}.legacy.$(date +%s)"
+    mv "${COMPAT_INSTALL_DIR}" "${backup_compat}" || true
+    info "Existing /opt/hkvm preserved as ${backup_compat}"
+  fi
+  ln -sfn "${DIRECT_INSTALL_DIR}" "${COMPAT_INSTALL_DIR}"
+
+  if [[ -f "${app_root}/app.js" ]]; then
+    cat > "/etc/systemd/system/${COMPAT_SERVICE}" <<EOF
+[Unit]
+Description=GKVM Panel
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${app_root}
+ExecStart=$(command -v node) ${app_root}/app.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=${PANEL_PORT}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    if [[ -d /run/systemd/system ]]; then
+      systemctl daemon-reload || true
+      systemctl enable --now "${COMPAT_SERVICE}" || true
+    else
+      local pid_file="/run/gkvm-panel.pid"
+      if [[ -f "${pid_file}" ]]; then
+        local old_pid
+        old_pid="$(cat "${pid_file}" 2>/dev/null || true)"
+        if [[ "${old_pid}" =~ ^[0-9]+$ ]]; then kill "${old_pid}" 2>/dev/null || true; fi
+      fi
+      nohup env NODE_ENV=production PORT="${PANEL_PORT}" node "${app_root}/app.js" > /var/log/gkvm-panel.log 2>&1 &
+      echo $! > "${pid_file}"
+      success "GKVM standalone process started (PID $(cat "${pid_file}"))"
+    fi
+  else
+    die "Installed GKVM archive does not contain app.js."
+  fi
+
+  success "GKVM panel files installed under ${DIRECT_INSTALL_DIR}."
+  card "GKVM panel" "DEPLOYED" "${BRIGHT_GREEN}" "Application files, Node dependencies and compatibility path are prepared."
+
+  sleep 2
+  reset_admin_credentials "${app_root}"
+}
+
+wait_for_panel() {
+  local attempts=0
+  while (( attempts < 20 )); do
+    if panel_is_healthy; then
+      return 0
+    fi
+    sleep 1
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+panel_is_healthy() {
+  local http="000"
+  command -v curl >/dev/null 2>&1 || return 1
+  http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 4 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || true)"
+  [[ "${http}" =~ ^[0-9]{3}$ && "${http}" != "000" ]]
 }
 
 # =============================================================================
@@ -623,32 +859,45 @@ download_legacy_installer() {
 # =============================================================================
 
 deploy_legacy() {
-  section "08 / 08" "DEPLOYMENT CORE" "Handing the prepared host to the proven direct-install engine."
-  echo; printf '%b╭──────────────────────────────────────────────────────────────────────╮%b\n' "${FLAME}${BOLD}" "${RESET}"
-  printf '%b│%b                    %b🔥 GKVM DEPLOYMENT CORE 🔥%b                    %b│%b\n' "${FLAME}" "${RESET}" "${BRIGHT_WHITE}${BOLD}" "${RESET}" "${FLAME}" "${RESET}"
-  printf '%b│%b                         %b◈ POWERING UP ◈%b                         %b│%b\n' "${FLAME}" "${RESET}" "${GOLD}${BOLD}" "${RESET}" "${FLAME}" "${RESET}"
-  printf '%b╰──────────────────────────────────────────────────────────────────────╯%b\n' "${FLAME}${BOLD}" "${RESET}"
+  section "08 / 08" "DEPLOYMENT CORE" "Deploying the actual GKVM panel, not just preparing the host."
   echo
-  if [[ "${ULTRA_EFFECTS}" == "true" ]]; then
-    local -a seq=("${BRIGHT_RED}🔥" "${FIRE}█" "${ORANGE}█" "${GOLD}█" "${BRIGHT_YELLOW}█" "${BRIGHT_CYAN}█" "${PURPLE}█" "${PINK}⚡")
-    local round element
-    for round in {1..3}; do
-      for element in "${seq[@]}"; do
-        printf '\r  %b %bBOOTING DEPLOYMENT ENGINE%b' "${element}" "${WHITE}${BOLD}" "${RESET}"
-        sleep 0.03
+  gradient_line "                 ██████  DEPLOYMENT CORE  ██████"
+  echo
+
+  if [[ "${LEGACY_AVAILABLE:-false}" == "true" ]]; then
+    if [[ "${ULTRA_EFFECTS}" == "true" ]]; then
+      local -a seq=("${BRIGHT_RED}🔥" "${FIRE}█" "${ORANGE}█" "${GOLD}█" "${BRIGHT_YELLOW}█" "${BRIGHT_CYAN}█" "${PURPLE}█" "${PINK}⚡")
+      local element round
+      for round in 1 2; do
+        for element in "${seq[@]}"; do
+          printf '\r  %b %bBOOTING DEPLOYMENT ENGINE%b' "${element}" "${WHITE}${BOLD}" "${RESET}"
+          sleep 0.03
+        done
       done
-    done
-    clear_line
+      clear_line
+    fi
+
+    set +e
+    "${LEGACY_PATCHED}" "$@" 2>&1 | tee "${CHILD_LOG}"
+    CHILD_EXIT_CODE="${PIPESTATUS[0]}"
+    set -e
+
+    if [[ "${CHILD_EXIT_CODE}" -eq 0 ]] && wait_for_panel; then
+      success "Legacy installer completed and the GKVM panel is responding."
+      local existing_root=""
+      if [[ -d /opt/gkvm/app ]]; then existing_root="/opt/gkvm/app"; elif [[ -d /opt/hkvm/app ]]; then existing_root="/opt/hkvm/app"; fi
+      [[ -n "${existing_root}" ]] && reset_admin_credentials "${existing_root}" || true
+      return 0
+    fi
+
+    warning "Legacy installer did not produce a healthy panel. Activating direct archive deployment."
+  else
+    warning "Legacy installer unavailable. Activating direct archive deployment."
   fi
-  echo; printf '%b  ┌──────────────────────────────────────────────────────────────┐%b\n' "${BRIGHT_WHITE}${BOLD}" "${RESET}"
-  printf '%b  │                  GKVM ENGINE ONLINE                          │%b\n' "${BRIGHT_WHITE}${BOLD}" "${RESET}"
-  printf '%b  └──────────────────────────────────────────────────────────────┘%b\n' "${BRIGHT_WHITE}${BOLD}" "${RESET}"
-  echo
-  set +e
-  "${LEGACY_PATCHED}" "$@" 2>&1 | tee "${CHILD_LOG}"
-  CHILD_EXIT_CODE="${PIPESTATUS[0]}"
-  set -e
-  return "${CHILD_EXIT_CODE}"
+
+  install_panel_archive
+  CHILD_EXIT_CODE=0
+  return 0
 }
 
 # =============================================================================
@@ -659,7 +908,11 @@ panel_health() {
   echo; printf '%b  PANEL HEALTH%b\n' "${BRIGHT_MAGENTA}${BOLD}" "${RESET}"; thin_divider
   local listening="false" http="000"
   if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -Eq ":${PANEL_PORT}([[:space:]]|$)"; then listening="true"; fi
-  http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo '000')"
+  http="000"
+  if command -v curl >/dev/null 2>&1; then
+    http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || true)"
+    [[ -z "${http}" ]] && http="000"
+  fi
   [[ "${listening}" == "true" ]] && success "TCP ${PANEL_PORT}: LISTENING" || warning "TCP ${PANEL_PORT}: NOT DETECTED"
   if [[ "${http}" =~ ^[0-9]{3}$ && "${http}" != "000" ]]; then success "HTTP health: ${http}"; else warning "HTTP health: NO RESPONSE"; fi
 }
@@ -720,7 +973,7 @@ final_screen() {
   divider; echo
   printf '%b  COMPATIBILITY%b\n\n' "${BRIGHT_YELLOW}${BOLD}" "${RESET}"
   label "Legacy Commit" "${LEGACY_COMMIT}" "${PURPLE}"
-  label "Panel Runtime" "/opt/hkvm" "${ICE}"
+  label "Panel Runtime" "/opt/gkvm + /opt/hkvm compatibility" "${ICE}"
   label "Service" "hkvm.service" "${GOLD}"
   echo; divider; echo
   if [[ "${CHILD_EXIT_CODE}" -eq 0 ]]; then
