@@ -1,27 +1,43 @@
 #!/usr/bin/env bash
 
 # ============================================================
-# GKVM PANEL — MAIN ULTRA INSTALLER
+#                    GKVM PANEL
+#              ULTRA INSTALLER V2.0
 #
 # Repository:
 #   https://github.com/nishant1477/Vnm-panel2
 #
-# ZIP:
+# Package:
 #   GKVM-panel.zip
 #
-# Supports:
-#   - Debian / Ubuntu
-#   - Normal VPS with systemd
-#   - GitHub Codespaces / containers without systemd
-#   - Node.js 20+
-#   - Automatic dependency installation
-#   - GKVM database initialization
-#   - Real bcrypt admin password creation/reset
-#   - Secure credentials file
-#   - Health checks
-#   - Firewall
-#   - gkvm management command
-#   - License disabled development mode
+# Supported:
+#   Ubuntu
+#   Debian
+#   Normal VPS / systemd
+#   GitHub Codespaces
+#   Containers without systemd
+#
+# Features:
+#   ✓ Animated terminal installer UI
+#   ✓ Progress indicators
+#   ✓ Automatic OS detection
+#   ✓ Node.js 20+ detection
+#   ✓ Automatic dependency installation
+#   ✓ Real GKVM app detection
+#   ✓ Real GKVM database discovery
+#   ✓ Real bcrypt admin password reset
+#   ✓ Admin credential verification
+#   ✓ SQLite backup
+#   ✓ Existing config backup
+#   ✓ Systemd support
+#   ✓ Standalone/Codespaces support
+#   ✓ Automatic port health check
+#   ✓ HTTP health check
+#   ✓ Firewall handling
+#   ✓ GKVM management CLI
+#   ✓ Admin password reset command
+#   ✓ Log viewer
+#   ✓ License disabled for development build
 # ============================================================
 
 set -Eeuo pipefail
@@ -30,85 +46,311 @@ set -Eeuo pipefail
 # COLORS
 # ============================================================
 
-RED='\e[1;31m'
-GREEN='\e[1;32m'
-YELLOW='\e[1;33m'
-CYAN='\e[1;36m'
-MAGENTA='\e[1;35m'
-WHITE='\e[1;37m'
-NC='\e[0m'
+ESC=$'\033'
+
+RESET="${ESC}[0m"
+BOLD="${ESC}[1m"
+DIM="${ESC}[2m"
+
+BLACK="${ESC}[30m"
+RED="${ESC}[31m"
+GREEN="${ESC}[32m"
+YELLOW="${ESC}[33m"
+BLUE="${ESC}[34m"
+MAGENTA="${ESC}[35m"
+CYAN="${ESC}[36m"
+WHITE="${ESC}[37m"
+
+BRIGHT_RED="${ESC}[91m"
+BRIGHT_GREEN="${ESC}[92m"
+BRIGHT_YELLOW="${ESC}[93m"
+BRIGHT_BLUE="${ESC}[94m"
+BRIGHT_MAGENTA="${ESC}[95m"
+BRIGHT_CYAN="${ESC}[96m"
+BRIGHT_WHITE="${ESC}[97m"
 
 # ============================================================
-# GKVM CONFIGURATION
+# GLOBAL CONFIG
 # ============================================================
 
-REPO_URL='https://github.com/nishant1477/Vnm-panel2.git'
-ZIP_NAME='GKVM-panel.zip'
+APP_NAME="GKVM Panel"
+APP_VERSION="2.0"
 
-INSTALL_DIR='/opt/gkvm'
+REPO_URL="https://github.com/nishant1477/Vnm-panel2.git"
+ZIP_NAME="GKVM-panel.zip"
+
+INSTALL_DIR="/opt/gkvm"
 APP_DIR="${INSTALL_DIR}/app"
 DATA_DIR="${INSTALL_DIR}/data"
 LOG_DIR="${INSTALL_DIR}/logs"
 BACKUP_DIR="${INSTALL_DIR}/backups"
 
-CONFIG_DIR='/etc/gkvm'
+CONFIG_DIR="/etc/gkvm"
 ENV_FILE="${CONFIG_DIR}/gkvm.env"
+RUNTIME_FILE="${CONFIG_DIR}/runtime.conf"
 CREDENTIAL_FILE="${CONFIG_DIR}/admin-credentials.txt"
 
 LOG_FILE="${LOG_DIR}/gkvm.log"
 BOOTSTRAP_LOG="${LOG_DIR}/bootstrap.log"
+INSTALLER_LOG="/var/log/gkvm-installer.log"
+
 PID_FILE="${INSTALL_DIR}/gkvm.pid"
 
-SERVICE_NAME='gkvm-panel'
+SERVICE_NAME="gkvm-panel"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-MANAGER_FILE='/usr/local/bin/gkvm'
+MANAGER_FILE="/usr/local/bin/gkvm"
 
-PANEL_PORT='8080'
-PANEL_NAME='GKVM Panel'
+PANEL_PORT="8080"
 
-ADMIN_USERNAME='admin'
-ADMIN_PASSWORD=''
+NODE_BIN=""
+NPM_BIN=""
+MAIN_JS=""
 
-TMP_DIR=''
-BOOTSTRAP_PID=''
+SOURCE_APP_DIR=""
+ZIP_FILE=""
+TMP_DIR=""
 
-HAS_SYSTEMD='false'
+RUNTIME_USER="root"
+RUNTIME_GROUP="root"
+RUNTIME_HOME="/root"
 
-NODE_BIN=''
-NPM_BIN=''
-MAIN_JS=''
+HAS_SYSTEMD="false"
+IS_CODESPACES="false"
 
-RUN_USER='root'
-RUN_GROUP='root'
+DB_PATH=""
+
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD=""
+
+BOOTSTRAP_PID=""
+
+ANIMATION="false"
 
 # ============================================================
-# FUNCTIONS
+# TERMINAL DETECTION
 # ============================================================
 
-line() {
-    echo -e "${MAGENTA}============================================================${NC}"
+if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]]; then
+    ANIMATION="true"
+fi
+
+if [[ "${CODESPACES:-false}" == "true" ]]; then
+    IS_CODESPACES="true"
+fi
+
+# ============================================================
+# LOG FILE SETUP
+# ============================================================
+
+mkdir -p "$(dirname "${INSTALLER_LOG}")" 2>/dev/null || true
+touch "${INSTALLER_LOG}" 2>/dev/null || true
+
+exec > >(tee -a "${INSTALLER_LOG}") 2>&1
+
+# ============================================================
+# UI FUNCTIONS
+# ============================================================
+
+terminal_width() {
+    local width
+    width="$(tput cols 2>/dev/null || echo 68)"
+
+    if [[ ! "${width}" =~ ^[0-9]+$ ]]; then
+        width=68
+    fi
+
+    (( width > 110 )) && width=110
+    (( width < 60 )) && width=60
+
+    echo "${width}"
+}
+
+center_text() {
+    local text="$1"
+    local width="$2"
+
+    local visible="${text//\x1b\[[0-9;]*m/}"
+    local len="${#visible}"
+
+    local spaces=$(( (width - len) / 2 ))
+
+    (( spaces < 0 )) && spaces=0
+
+    printf "%${spaces}s%s\n" "" "$text"
+}
+
+banner() {
+
+    clear 2>/dev/null || true
+
+    local width
+    width="$(terminal_width)"
+
+    echo
+    echo -e "${BRIGHT_CYAN}${BOLD}"
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                                                              ║"
+    echo "║                    ██████╗ ██╗  ██╗██╗   ██╗                 ║"
+    echo "║                   ██╔════╝ ██║ ██╔╝██║   ██║                 ║"
+    echo "║                   ██║  ███╗█████╔╝ ██║   ██║                 ║"
+    echo "║                   ██║   ██║██╔═██╗ ╚██╗ ██╔╝                 ║"
+    echo "║                   ╚██████╔╝██║  ██╗ ╚████╔╝                  ║"
+    echo "║                    ╚═════╝ ╚═╝  ╚═╝  ╚═══╝                   ║"
+    echo "║                                                              ║"
+    echo "║                     GKVM PANEL                               ║"
+    echo "║                 ULTRA INSTALLER ${APP_VERSION}                       ║"
+    echo "║                                                              ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+
+    echo -e "${DIM}${CYAN}     VM Management • KVM • QEMU • Console • Network • Admin${RESET}"
+    echo
+}
+
+section() {
+
+    local title="$1"
+
+    echo
+    echo -e "${BRIGHT_MAGENTA}${BOLD}┌────────────────────────────────────────────────────────────┐${RESET}"
+    echo -e "${BRIGHT_MAGENTA}${BOLD}│ ${title}${RESET}"
+    echo -e "${BRIGHT_MAGENTA}${BOLD}└────────────────────────────────────────────────────────────┘${RESET}"
 }
 
 info() {
-    echo -e "${CYAN}[GKVM][INFO]${NC} $*"
+    echo -e "  ${CYAN}◆${RESET} ${WHITE}$*${RESET}"
 }
 
-ok() {
-    echo -e "${GREEN}[GKVM][OK]${NC} $*"
+success() {
+    echo -e "  ${BRIGHT_GREEN}✔${RESET} ${BRIGHT_GREEN}$*${RESET}"
 }
 
-warn() {
-    echo -e "${YELLOW}[GKVM][WARNING]${NC} $*"
+warning() {
+    echo -e "  ${BRIGHT_YELLOW}⚠${RESET} ${BRIGHT_YELLOW}$*${RESET}"
 }
 
-error() {
-    echo -e "${RED}[GKVM][ERROR]${NC} $*"
+error_msg() {
+    echo -e "  ${BRIGHT_RED}✖${RESET} ${BRIGHT_RED}$*${RESET}"
+}
+
+detail() {
+    echo -e "    ${DIM}└─${RESET} $*"
 }
 
 die() {
-    error "$*"
+    error_msg "$*"
     exit 1
+}
+
+separator() {
+    echo -e "${DIM}──────────────────────────────────────────────────────────────${RESET}"
+}
+
+# ============================================================
+# ANIMATED SPINNER
+# ============================================================
+
+run_step() {
+
+    local label="$1"
+    shift
+
+    local frames=(
+        "⠋"
+        "⠙"
+        "⠹"
+        "⠸"
+        "⠼"
+        "⠴"
+        "⠦"
+        "⠧"
+        "⠇"
+        "⠏"
+    )
+
+    local pid
+    local i=0
+    local rc=0
+
+    if [[ "${ANIMATION}" == "true" ]]; then
+
+        "$@" >>"${INSTALLER_LOG}" 2>&1 &
+        pid=$!
+
+        while kill -0 "${pid}" >/dev/null 2>&1; do
+
+            printf "\r  ${BRIGHT_CYAN}%s${RESET} ${WHITE}%-52s${RESET}" \
+                "${frames[$((i % ${#frames[@]}))]}" \
+                "${label}"
+
+            i=$((i + 1))
+
+            sleep 0.08
+
+        done
+
+        if wait "${pid}"; then
+            rc=0
+        else
+            rc=$?
+        fi
+
+        if [[ "${rc}" -eq 0 ]]; then
+
+            printf "\r  ${BRIGHT_GREEN}✔${RESET} ${GREEN}%-60s${RESET}\n" \
+                "${label}"
+
+        else
+
+            printf "\r  ${BRIGHT_RED}✖${RESET} ${RED}%-60s${RESET}\n" \
+                "${label}"
+
+        fi
+
+    else
+
+        info "${label}..."
+
+        if "$@" >>"${INSTALLER_LOG}" 2>&1; then
+
+            success "${label}"
+
+        else
+
+            rc=$?
+
+            error_msg "${label} failed."
+
+        fi
+
+    fi
+
+    return "${rc}"
+}
+
+# ============================================================
+# SIMPLE EFFECT
+# ============================================================
+
+pulse() {
+
+    [[ "${ANIMATION}" == "true" ]] || return 0
+
+    local text="$1"
+
+    for symbol in "." ".." "..."; do
+
+        printf "\r  ${DIM}${CYAN}%s%s${RESET}" \
+            "${text}" \
+            "${symbol}"
+
+        sleep 0.12
+
+    done
+
+    printf "\r\033[2K"
+
 }
 
 # ============================================================
@@ -120,8 +362,11 @@ cleanup() {
     if [[ -n "${BOOTSTRAP_PID}" ]] &&
        [[ "${BOOTSTRAP_PID}" =~ ^[0-9]+$ ]]; then
 
-        kill "${BOOTSTRAP_PID}" >/dev/null 2>&1 || true
-        wait "${BOOTSTRAP_PID}" >/dev/null 2>&1 || true
+        kill "${BOOTSTRAP_PID}" \
+            >/dev/null 2>&1 || true
+
+        wait "${BOOTSTRAP_PID}" \
+            >/dev/null 2>&1 || true
 
     fi
 
@@ -136,203 +381,227 @@ trap cleanup EXIT
 # ERROR HANDLER
 # ============================================================
 
-on_error() {
+installer_error() {
 
     local rc=$?
 
-    error "Installer failed at line ${BASH_LINENO[0]} (exit ${rc})."
+    echo
+    separator
 
-    if [[ -f "${LOG_FILE}" ]]; then
-
-        echo
-        echo "---------------- GKVM LOG ----------------"
-
-        tail -n 160 "${LOG_FILE}" || true
-
-        echo "-------------------------------------------"
-
-    fi
+    error_msg "GKVM installer stopped unexpectedly."
+    detail "Exit code : ${rc}"
+    detail "Installer log : ${INSTALLER_LOG}"
 
     if [[ -f "${BOOTSTRAP_LOG}" ]]; then
 
         echo
-        echo "------------- BOOTSTRAP LOG ---------------"
+        echo -e "${BRIGHT_YELLOW}Bootstrap diagnostics:${RESET}"
 
-        tail -n 160 "${BOOTSTRAP_LOG}" || true
-
-        echo "-------------------------------------------"
+        tail -n 120 "${BOOTSTRAP_LOG}" || true
 
     fi
+
+    echo
 
     exit "${rc}"
 }
 
-trap on_error ERR
+trap installer_error ERR
+
+# ============================================================
+# CHECK ROOT
+# ============================================================
+
+[[ "${EUID}" -eq 0 ]] ||
+    die "Run this installer as root."
 
 # ============================================================
 # BANNER
 # ============================================================
 
-clear 2>/dev/null || true
-
-echo -e "${CYAN}"
-
-cat <<'EOF'
-
- ██████╗ ██╗  ██╗██╗   ██╗███╗   ███╗
-██╔════╝ ██║ ██╔╝██║   ██║████╗ ████║
-██║  ███╗█████╔╝ ██║   ██║██╔████╔██║
-██║   ██║██╔═██╗ ╚██╗ ██╔╝██║╚██╔╝██║
-╚██████╔╝██║  ██╗ ╚████╔╝ ██║ ╚═╝ ██║
- ╚═════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝
-
-             GKVM PANEL
-          MAIN ULTRA INSTALLER
-
-EOF
-
-echo -e "${NC}"
-
-line
+banner
 
 # ============================================================
-# ROOT / OS
+# DETECT OS
 # ============================================================
 
-[[ ${EUID} -eq 0 ]] || die "Please run this installer as root."
+section "SYSTEM DETECTION"
 
-[[ -f /etc/os-release ]] || die "Unable to detect operating system."
+[[ -f /etc/os-release ]] ||
+    die "Cannot detect operating system."
 
 source /etc/os-release
 
-info "Operating System : ${PRETTY_NAME:-unknown}"
+info "Operating system : ${PRETTY_NAME:-unknown}"
 info "Architecture     : $(uname -m)"
 info "Kernel           : $(uname -r)"
 
-[[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]] \
-    || die "Unsupported OS: ${ID:-unknown}. Use Ubuntu or Debian."
+if [[ "${ID:-}" != "ubuntu" &&
+      "${ID:-}" != "debian" ]]; then
 
-# ============================================================
-# DETECT INSTALL USER
-# ============================================================
-
-if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-
-    RUN_USER="${SUDO_USER}"
-
-    RUN_GROUP="$(
-        id -gn "${SUDO_USER}" 2>/dev/null || echo "${SUDO_USER}"
-    )"
-
-else
-
-    RUN_USER="root"
-    RUN_GROUP="root"
+    die "Supported systems: Ubuntu and Debian."
 
 fi
 
-info "Runtime user     : ${RUN_USER}"
-info "Runtime group    : ${RUN_GROUP}"
+# ============================================================
+# DETECT RUNTIME USER
+# ============================================================
+
+if [[ -n "${SUDO_USER:-}" &&
+      "${SUDO_USER}" != "root" ]]; then
+
+    RUNTIME_USER="${SUDO_USER}"
+
+else
+
+    RUNTIME_USER="root"
+
+fi
+
+RUNTIME_GROUP="$(
+    id -gn "${RUNTIME_USER}" 2>/dev/null ||
+    echo "${RUNTIME_USER}"
+)"
+
+RUNTIME_HOME="$(
+    getent passwd "${RUNTIME_USER}" |
+    cut -d: -f6
+)"
+
+[[ -n "${RUNTIME_HOME}" ]] ||
+    RUNTIME_HOME="/root"
+
+info "Runtime user      : ${RUNTIME_USER}"
+info "Runtime home      : ${RUNTIME_HOME}"
 
 # ============================================================
-# SYSTEMD DETECTION
+# SYSTEMD
 # ============================================================
 
 if command -v systemctl >/dev/null 2>&1 &&
    [[ -d /run/systemd/system ]]; then
 
-    HAS_SYSTEMD='true'
+    HAS_SYSTEMD="true"
 
-    ok "systemd detected — service mode enabled."
+    success "systemd available"
 
 else
 
-    HAS_SYSTEMD='false'
+    HAS_SYSTEMD="false"
 
-    warn "systemd not detected — standalone mode enabled."
-    info "This is normal in GitHub Codespaces and containers."
+    warning "systemd unavailable"
+    detail "Standalone process mode will be used."
 
 fi
 
-line
+if [[ "${IS_CODESPACES}" == "true" ]]; then
+
+    warning "GitHub Codespaces detected"
+    detail "No systemd VM-host service will be created."
+
+fi
 
 # ============================================================
-# PACKAGES
+# HARDWARE
 # ============================================================
 
-export DEBIAN_FRONTEND=noninteractive
+if [[ -e /dev/kvm ]]; then
+    success "/dev/kvm detected"
+    detail "KVM acceleration is available."
+else
+    warning "/dev/kvm not detected"
+    detail "GKVM can still install, but local KVM acceleration may be unavailable."
+fi
 
-info "Updating package lists..."
-
-apt-get update -y
-
-info "Installing base dependencies..."
-
-apt-get install -y \
-    ca-certificates \
-    curl \
-    git \
-    unzip \
-    file \
-    lsof \
-    procps \
-    iproute2 \
-    openssl \
-    build-essential \
-    python3
+separator
 
 # ============================================================
-# VM HOST PACKAGES
+# PACKAGE INSTALLATION
 # ============================================================
 
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
+section "SYSTEM DEPENDENCIES"
 
-    info "Installing virtualization dependencies..."
+run_step \
+    "Updating APT package indexes" \
+    apt-get update -y
 
+run_step \
+    "Installing base packages" \
     apt-get install -y \
-        qemu-system-x86 \
-        qemu-utils \
-        ovmf \
-        cloud-init \
-        libvirt-daemon-system \
-        libvirt-clients
+        ca-certificates \
+        curl \
+        git \
+        unzip \
+        file \
+        lsof \
+        procps \
+        iproute2 \
+        openssl \
+        build-essential \
+        python3 \
+        sqlite3 \
+        util-linux
 
-    ok "Virtualization dependencies installed."
+# ============================================================
+# VM PACKAGES
+# ============================================================
+
+if [[ "${HAS_SYSTEMD}" == "true" &&
+      -e /dev/kvm ]]; then
+
+    run_step \
+        "Installing QEMU and virtualization packages" \
+        apt-get install -y \
+            qemu-system-x86 \
+            qemu-utils \
+            ovmf \
+            cloud-init \
+            libvirt-daemon-system \
+            libvirt-clients
 
 else
 
-    warn "Skipping QEMU/libvirt host packages."
-    info "Container/Codespace environment detected."
+    warning "Skipping heavy local VM-host packages for this environment."
 
 fi
-
-ok "System dependencies installed."
-
-line
 
 # ============================================================
 # NODE.JS
 # ============================================================
 
-NODE_OK='false'
+section "NODE.JS RUNTIME"
+
+NODE_OK="false"
 
 if command -v node >/dev/null 2>&1; then
 
-    NODE_VERSION="$(node -v | sed 's/^v//')"
-    NODE_MAJOR="${NODE_VERSION%%.*}"
-
-    NODE_BIN="$(command -v node)"
-    NODE_BIN="$(
-        readlink -f "${NODE_BIN}" 2>/dev/null ||
-        echo "${NODE_BIN}"
+    NODE_VERSION="$(
+        node -v |
+        sed 's/^v//'
     )"
 
-    info "Detected Node.js: v${NODE_VERSION}"
+    NODE_MAJOR="${NODE_VERSION%%.*}"
 
     if [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] &&
        (( NODE_MAJOR >= 20 )); then
 
-        NODE_OK='true'
+        NODE_OK="true"
+
+        NODE_BIN="$(
+            readlink -f "$(command -v node)" 2>/dev/null ||
+            command -v node
+        )"
+
+        NPM_BIN="$(
+            readlink -f "$(command -v npm)" 2>/dev/null ||
+            command -v npm
+        )"
+
+        success "Node.js ${NODE_VERSION} detected"
+
+    else
+
+        warning "Detected Node.js ${NODE_VERSION}, but GKVM requires Node.js 20+."
 
     fi
 
@@ -340,21 +609,16 @@ fi
 
 if [[ "${NODE_OK}" != "true" ]]; then
 
-    info "Installing Node.js 22..."
+    run_step \
+        "Configuring NodeSource Node.js 22 repository" \
+        bash -c \
+        'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -'
 
-    curl -fsSL \
-        https://deb.nodesource.com/setup_22.x |
-        bash -
-
-    apt-get install -y nodejs
+    run_step \
+        "Installing Node.js 22" \
+        apt-get install -y nodejs
 
 fi
-
-command -v node >/dev/null 2>&1 \
-    || die "Node.js installation failed."
-
-command -v npm >/dev/null 2>&1 \
-    || die "npm installation failed."
 
 NODE_BIN="$(
     readlink -f "$(command -v node)" 2>/dev/null ||
@@ -366,32 +630,37 @@ NPM_BIN="$(
     command -v npm
 )"
 
-[[ -x "${NODE_BIN}" ]] \
-    || die "Node binary is not executable: ${NODE_BIN}"
+[[ -x "${NODE_BIN}" ]] ||
+    die "Node binary is unavailable."
 
-[[ -x "${NPM_BIN}" ]] \
-    || die "npm binary is not executable: ${NPM_BIN}"
+[[ -x "${NPM_BIN}" ]] ||
+    die "npm binary is unavailable."
 
-ok "Node.js: $("${NODE_BIN}" -v)"
-ok "npm: $("${NPM_BIN}" -v)"
+success "Node.js : $("${NODE_BIN}" -v)"
+success "npm     : $("${NPM_BIN}" -v)"
 
-line
+separator
 
 # ============================================================
 # STORAGE
 # ============================================================
 
-info "Preparing GKVM storage..."
+section "GKVM STORAGE"
 
 mkdir -p \
     "${INSTALL_DIR}" \
+    "${APP_DIR}" \
     "${DATA_DIR}" \
     "${LOG_DIR}" \
     "${BACKUP_DIR}" \
     "${CONFIG_DIR}"
 
+touch "${LOG_FILE}"
+touch "${BOOTSTRAP_LOG}"
+
 chmod 755 \
     "${INSTALL_DIR}" \
+    "${APP_DIR}" \
     "${DATA_DIR}" \
     "${LOG_DIR}"
 
@@ -399,56 +668,14 @@ chmod 700 \
     "${BACKUP_DIR}" \
     "${CONFIG_DIR}"
 
-touch "${LOG_FILE}"
+chmod 640 \
+    "${LOG_FILE}" \
+    "${BOOTSTRAP_LOG}"
 
-chmod 640 "${LOG_FILE}"
-
-touch "${BOOTSTRAP_LOG}"
-
-chmod 640 "${BOOTSTRAP_LOG}"
+success "GKVM directories prepared."
 
 # ============================================================
-# BACKUP ENVIRONMENT
-# ============================================================
-
-if [[ -f "${ENV_FILE}" ]]; then
-
-    cp -a \
-        "${ENV_FILE}" \
-        "${BACKUP_DIR}/gkvm.env.$(date +%Y%m%d-%H%M%S).bak"
-
-    ok "Existing GKVM environment backed up."
-
-fi
-
-# ============================================================
-# BACKUP DATABASE
-# ============================================================
-
-if [[ -f "${DATA_DIR}/vnm.db" ]]; then
-
-    cp -a \
-        "${DATA_DIR}/vnm.db" \
-        "${BACKUP_DIR}/vnm.db.$(date +%Y%m%d-%H%M%S).bak"
-
-    [[ -f "${DATA_DIR}/vnm.db-wal" ]] &&
-        cp -a \
-            "${DATA_DIR}/vnm.db-wal" \
-            "${BACKUP_DIR}/vnm.db-wal.$(date +%Y%m%d-%H%M%S).bak" ||
-        true
-
-    [[ -f "${DATA_DIR}/vnm.db-shm" ]] &&
-        cp -a \
-            "${DATA_DIR}/vnm.db-shm" \
-            "${BACKUP_DIR}/vnm.db-shm.$(date +%Y%m%d-%H%M%S).bak" ||
-        true
-
-    ok "Existing GKVM database backed up."
-
-fi
-
-# ============================================================
-# STOP OLD SERVICE
+# OLD SERVICE
 # ============================================================
 
 if [[ "${HAS_SYSTEMD}" == "true" ]]; then
@@ -459,29 +686,38 @@ if [[ "${HAS_SYSTEMD}" == "true" ]]; then
 fi
 
 # ============================================================
-# STOP OLD PID
+# OLD PID
 # ============================================================
 
 if [[ -f "${PID_FILE}" ]]; then
 
-    OLD_PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
+    OLD_PID="$(
+        cat "${PID_FILE}" 2>/dev/null ||
+        true
+    )"
 
     if [[ "${OLD_PID}" =~ ^[0-9]+$ ]]; then
 
         kill "${OLD_PID}" \
-            >/dev/null 2>&1 || true
+            >/dev/null 2>&1 ||
+            true
 
-        for _ in {1..20}; do
+        for _ in {1..25}; do
 
-            kill -0 "${OLD_PID}" \
-                >/dev/null 2>&1 || break
+            if ! kill -0 "${OLD_PID}" \
+                >/dev/null 2>&1; then
+
+                break
+
+            fi
 
             sleep 0.2
 
         done
 
         kill -9 "${OLD_PID}" \
-            >/dev/null 2>&1 || true
+            >/dev/null 2>&1 ||
+            true
 
     fi
 
@@ -490,56 +726,52 @@ if [[ -f "${PID_FILE}" ]]; then
 fi
 
 # ============================================================
-# STOP OLD GKVM LISTENER
+# OLD PORT
 # ============================================================
 
 if command -v lsof >/dev/null 2>&1; then
 
-    mapfile -t LISTEN_PIDS < <(
+    mapfile -t PORT_PIDS < <(
         lsof \
             -t \
             -nP \
             -iTCP:"${PANEL_PORT}" \
             -sTCP:LISTEN \
-            2>/dev/null || true
+            2>/dev/null ||
+            true
     )
 
-    for LPID in "${LISTEN_PIDS[@]:-}"; do
+    for PID in "${PORT_PIDS[@]:-}"; do
 
-        [[ "${LPID}" =~ ^[0-9]+$ ]] || continue
+        [[ "${PID}" =~ ^[0-9]+$ ]] ||
+            continue
 
-        CMD="$(ps -p "${LPID}" -o args= 2>/dev/null || true)"
+        CMD="$(
+            ps -p "${PID}" \
+                -o args= \
+                2>/dev/null ||
+                true
+        )"
 
         CWD="$(
-            readlink -f \
-                "/proc/${LPID}/cwd" \
-                2>/dev/null || true
+            readlink -f "/proc/${PID}/cwd" \
+                2>/dev/null ||
+                true
         )"
 
         if [[ "${CWD}" == "${APP_DIR}" ]] ||
            [[ "${CMD}" == *"${APP_DIR}/app.js"* ]]; then
 
-            warn "Stopping old GKVM listener PID ${LPID}."
+            warning "Stopping old GKVM process PID ${PID}."
 
-            kill "${LPID}" \
-                >/dev/null 2>&1 || true
-
-            for _ in {1..20}; do
-
-                kill -0 "${LPID}" \
-                    >/dev/null 2>&1 || break
-
-                sleep 0.2
-
-            done
-
-            kill -9 "${LPID}" \
-                >/dev/null 2>&1 || true
+            kill "${PID}" \
+                >/dev/null 2>&1 ||
+                true
 
         else
 
             die \
-                "Port ${PANEL_PORT} is already used by another process (PID ${LPID})."
+                "Port ${PANEL_PORT} is already used by another application."
 
         fi
 
@@ -547,34 +779,67 @@ if command -v lsof >/dev/null 2>&1; then
 
 fi
 
-ok "GKVM storage prepared."
-
-line
-
 # ============================================================
-# DOWNLOAD REPOSITORY
+# BACKUP EXISTING APP
 # ============================================================
 
-TMP_DIR="$(mktemp -d -t gkvm-installer-XXXXXX)"
+if [[ -f "${APP_DIR}/app.js" ]]; then
+
+    BACKUP_APP="${BACKUP_DIR}/app-$(date +%Y%m%d-%H%M%S)"
+
+    mkdir -p "${BACKUP_APP}"
+
+    pulse "Backing up existing GKVM"
+
+    cp -a \
+        "${APP_DIR}/." \
+        "${BACKUP_APP}/"
+
+    success "Previous application backed up"
+    detail "${BACKUP_APP}"
+
+fi
+
+# ============================================================
+# BACKUP ENV
+# ============================================================
+
+if [[ -f "${ENV_FILE}" ]]; then
+
+    cp -a \
+        "${ENV_FILE}" \
+        "${BACKUP_DIR}/gkvm.env.$(date +%Y%m%d-%H%M%S).bak"
+
+    success "Existing environment backed up."
+
+fi
+
+separator
+
+# ============================================================
+# DOWNLOAD
+# ============================================================
+
+section "GKVM PACKAGE"
+
+TMP_DIR="$(
+    mktemp -d \
+    -t \
+    gkvm-installer-XXXXXX
+)"
 
 REPO_DIR="${TMP_DIR}/repo"
 EXTRACT_DIR="${TMP_DIR}/extract"
 
 mkdir -p "${EXTRACT_DIR}"
 
-info "Cloning GKVM repository..."
-
-git clone \
-    --depth 1 \
-    --single-branch \
-    "${REPO_URL}" \
-    "${REPO_DIR}"
-
-ok "Repository cloned."
-
-# ============================================================
-# FIND ZIP
-# ============================================================
+run_step \
+    "Downloading GKVM repository" \
+    git clone \
+        --depth 1 \
+        --single-branch \
+        "${REPO_URL}" \
+        "${REPO_DIR}"
 
 ZIP_FILE="${REPO_DIR}/${ZIP_NAME}"
 
@@ -584,95 +849,63 @@ if [[ ! -f "${ZIP_FILE}" ]]; then
         find "${REPO_DIR}" \
             -type f \
             -name "${ZIP_NAME}" \
-            -not -path '*/.git/*' \
+            -not -path "*/.git/*" \
             -print \
             -quit \
-            2>/dev/null || true
+            2>/dev/null ||
+            true
     )"
 
 fi
 
-[[ -n "${ZIP_FILE}" && -f "${ZIP_FILE}" ]] \
-    || die "${ZIP_NAME} was not found in repository."
+[[ -n "${ZIP_FILE}" &&
+   -f "${ZIP_FILE}" ]] ||
+    die "${ZIP_NAME} was not found."
 
-ZIP_SIZE_MB="$(
-    du -m "${ZIP_FILE}" |
-    awk '{print $1}'
-)"
+ZIP_SIZE="$(du -h "${ZIP_FILE}" | awk '{print $1}')"
 
-info "Found ${ZIP_NAME}: ${ZIP_SIZE_MB} MB"
+success "GKVM package found"
+detail "Size: ${ZIP_SIZE}"
 
-(( ZIP_SIZE_MB >= 1 )) \
-    || die "GKVM ZIP is empty or invalid."
+run_step \
+    "Validating GKVM archive" \
+    unzip -t "${ZIP_FILE}"
 
-# ============================================================
-# EXTRACT ZIP
-# ============================================================
+run_step \
+    "Extracting GKVM archive" \
+    unzip -q \
+        "${ZIP_FILE}" \
+        -d "${EXTRACT_DIR}"
 
-info "Extracting GKVM application..."
-
-unzip -q \
-    "${ZIP_FILE}" \
-    -d "${EXTRACT_DIR}"
-
-ok "GKVM ZIP extracted."
-
-line
+separator
 
 # ============================================================
-# DETECT APP ROOT
+# APP DETECTION
 # ============================================================
 
-info "Detecting GKVM application root..."
+section "APPLICATION DETECTION"
 
 mapfile -t APP_FILES < <(
     find "${EXTRACT_DIR}" \
         -type f \
-        -name app.js \
-        -not -path '*/node_modules/*' \
-        -not -path '*/.git/*' \
-        -print \
-        | sort
+        -name "app.js" \
+        -not -path "*/node_modules/*" \
+        -not -path "*/.git/*" \
+        -print |
+    sort
 )
 
-SOURCE_APP_DIR=''
+SOURCE_APP_DIR=""
 
 if [[ "${#APP_FILES[@]}" -gt 0 ]]; then
 
-    SOURCE_APP_DIR="$(dirname "${APP_FILES[0]}")"
+    for FILE in "${APP_FILES[@]}"; do
 
-fi
+        DIR="$(dirname "${FILE}")"
 
-# Fallback to package.json main
-if [[ -z "${SOURCE_APP_DIR}" ]]; then
-
-    mapfile -t PACKAGE_FILES < <(
-        find "${EXTRACT_DIR}" \
-            -type f \
-            -name package.json \
-            -not -path '*/node_modules/*' \
-            -not -path '*/.git/*' \
-            -print \
-            | sort
-    )
-
-    for PKG in "${PACKAGE_FILES[@]}"; do
-
-        DIR="$(dirname "${PKG}")"
-
-        if "${NODE_BIN}" -e '
-            const p=require(process.argv[1]);
-            const m=p.main;
-
-            process.exit(
-                typeof m === "string" && m.trim()
-                    ? 0
-                    : 1
-            );
-        ' "${PKG}" >/dev/null 2>&1; then
+        if [[ -f "${DIR}/package.json" ]]; then
 
             SOURCE_APP_DIR="${DIR}"
-
             break
 
         fi
@@ -681,16 +914,27 @@ if [[ -z "${SOURCE_APP_DIR}" ]]; then
 
 fi
 
-[[ -n "${SOURCE_APP_DIR}" ]] \
-    || die "Unable to locate GKVM application root."
+if [[ -z "${SOURCE_APP_DIR}" &&
+      "${#APP_FILES[@]}" -gt 0 ]]; then
 
-[[ "${SOURCE_APP_DIR}" != *'/node_modules/'* ]] \
-    || die "Safety failure: application root is inside node_modules."
+    SOURCE_APP_DIR="$(
+        dirname "${APP_FILES[0]}"
+    )"
 
-info "Application root: ${SOURCE_APP_DIR}"
+fi
+
+[[ -n "${SOURCE_APP_DIR}" ]] ||
+    die "Could not locate GKVM app.js."
+
+if [[ "${SOURCE_APP_DIR}" == *"/node_modules/"* ]]; then
+    die "Safety check failed: app root is inside node_modules."
+fi
+
+info "Detected application:"
+detail "${SOURCE_APP_DIR}"
 
 # ============================================================
-# INSTALL APPLICATION
+# INSTALL APP
 # ============================================================
 
 rm -rf "${APP_DIR}"
@@ -701,73 +945,127 @@ cp -a \
     "${SOURCE_APP_DIR}/." \
     "${APP_DIR}/"
 
-[[ -f "${APP_DIR}/app.js" ]] \
-    || die "GKVM app.js was not found after extraction."
+MAIN_JS="${APP_DIR}/app.js"
 
-ok "GKVM application installed."
+[[ -f "${MAIN_JS}" ]] ||
+    die "GKVM app.js missing after installation."
 
-line
+success "GKVM application installed."
 
 # ============================================================
-# APP DATA
+# RUNTIME OWNERSHIP
 # ============================================================
+
+if [[ "${HAS_SYSTEMD}" == "true" ]]; then
+
+    chown -R root:root \
+        "${INSTALL_DIR}"
+
+else
+
+    chown -R \
+        "${RUNTIME_USER}:${RUNTIME_GROUP}" \
+        "${INSTALL_DIR}"
+
+fi
 
 mkdir -p "${APP_DIR}/data"
-
-chmod 755 "${APP_DIR}/data"
-
-# Make sure the application can write data.
-chmod -R u+rwX,go+rX "${APP_DIR}"
 
 # ============================================================
 # NODE DEPENDENCIES
 # ============================================================
 
+section "NODE DEPENDENCIES"
+
 cd "${APP_DIR}"
 
-[[ -f package.json ]] \
-    || die "package.json missing from GKVM application."
+[[ -f package.json ]] ||
+    die "GKVM package.json missing."
 
-info "Installing GKVM dependencies..."
+if [[ "${HAS_SYSTEMD}" == "true" ]]; then
+
+    DEP_USER="root"
+
+else
+
+    DEP_USER="${RUNTIME_USER}"
+
+fi
 
 if [[ -f package-lock.json ]]; then
 
-    if ! "${NPM_BIN}" ci --omit=dev; then
+    if [[ "${DEP_USER}" == "root" ]]; then
 
-        warn "npm ci failed — retrying npm install."
+        run_step \
+            "Installing locked npm dependencies" \
+            "${NPM_BIN}" ci --omit=dev ||
+        run_step \
+            "Installing npm dependencies using fallback" \
+            "${NPM_BIN}" install --omit=dev
 
-        "${NPM_BIN}" install --omit=dev
+    else
+
+        run_step \
+            "Installing locked npm dependencies" \
+            runuser -u "${DEP_USER}" \
+                -- "${NPM_BIN}" ci --omit=dev ||
+        run_step \
+            "Installing npm dependencies using fallback" \
+            runuser -u "${DEP_USER}" \
+                -- "${NPM_BIN}" install --omit=dev
 
     fi
 
 else
 
-    "${NPM_BIN}" install --omit=dev
+    if [[ "${DEP_USER}" == "root" ]]; then
+
+        run_step \
+            "Installing npm dependencies" \
+            "${NPM_BIN}" install --omit=dev
+
+    else
+
+        run_step \
+            "Installing npm dependencies" \
+            runuser -u "${DEP_USER}" \
+                -- "${NPM_BIN}" install --omit=dev
+
+    fi
 
 fi
 
-info "Rebuilding native modules..."
+if [[ "${DEP_USER}" == "root" ]]; then
 
-"${NPM_BIN}" rebuild sqlite3 ssh2 \
-    >/dev/null 2>&1 \
-    || warn "Native module rebuild returned non-zero."
+    run_step \
+        "Rebuilding native modules" \
+        "${NPM_BIN}" rebuild sqlite3 ssh2
 
-ok "GKVM dependencies installed."
+else
 
-line
+    run_step \
+        "Rebuilding native modules" \
+        runuser -u "${DEP_USER}" \
+            -- "${NPM_BIN}" rebuild sqlite3 ssh2
+
+fi
+
+success "GKVM dependencies installed."
+
+separator
 
 # ============================================================
-# SESSION SECRET
+# SESSION CONFIG
 # ============================================================
 
-SESSION_SECRET="$(openssl rand -hex 32)"
+section "GKVM CONFIGURATION"
 
-[[ -n "${SESSION_SECRET}" ]] \
-    || die "Failed to generate session secret."
+SESSION_SECRET="$(
+    openssl rand -hex 32
+)"
 
-# ============================================================
-# ENVIRONMENT
-# ============================================================
+[[ -n "${SESSION_SECRET}" ]] ||
+    die "Could not generate session secret."
 
 cat > "${ENV_FILE}" <<EOF
 NODE_ENV=production
@@ -790,39 +1088,57 @@ EOF
 
 chmod 600 "${ENV_FILE}"
 
-chown root:root "${ENV_FILE}"
+if [[ "${HAS_SYSTEMD}" == "true" ]]; then
 
-ln -sfn \
-    "${ENV_FILE}" \
-    "${APP_DIR}/.env"
+    chown root:root "${ENV_FILE}"
 
-bash -n "${ENV_FILE}" \
-    || die "Generated GKVM environment file is invalid."
+    ln -sfn \
+        "${ENV_FILE}" \
+        "${APP_DIR}/.env"
 
-ok "GKVM environment created."
+else
 
-line
+    STANDALONE_ENV="${INSTALL_DIR}/gkvm.env"
+
+    cp -f \
+        "${ENV_FILE}" \
+        "${STANDALONE_ENV}"
+
+    chown \
+        "${RUNTIME_USER}:${RUNTIME_GROUP}" \
+        "${STANDALONE_ENV}"
+
+    chmod 600 "${STANDALONE_ENV}"
+
+    rm -f "${APP_DIR}/.env"
+
+    ln -sfn \
+        "${STANDALONE_ENV}" \
+        "${APP_DIR}/.env"
+
+fi
+
+success "Environment generated."
 
 # ============================================================
-# ENTRYPOINT
+# SYNTAX CHECK
 # ============================================================
 
-MAIN_JS="${APP_DIR}/app.js"
+run_step \
+    "Checking GKVM JavaScript syntax" \
+    "${NODE_BIN}" \
+        --check \
+        "${MAIN_JS}"
 
-info "GKVM entrypoint: ${MAIN_JS}"
+success "Application syntax is valid."
 
-"${NODE_BIN}" --check "${MAIN_JS}" \
-    || die "GKVM application syntax check failed."
-
-ok "GKVM application syntax check passed."
-
-line
+separator
 
 # ============================================================
-# CSRF COMPATIBILITY PATCH
+# OPTIONAL CSRF COMPATIBILITY
 # ============================================================
 
-info "Checking GKVM login/CSRF compatibility..."
+section "AUTHENTICATION COMPATIBILITY"
 
 cp -a \
     "${MAIN_JS}" \
@@ -833,9 +1149,11 @@ from pathlib import Path
 import re
 import sys
 
-p = Path(sys.argv[1])
+path = Path(sys.argv[1])
 
-s = p.read_text(encoding="utf-8")
+text = path.read_text(
+    encoding="utf-8"
+)
 
 pattern = re.compile(
     r"function\s+csrfProtection\s*"
@@ -843,42 +1161,56 @@ pattern = re.compile(
     re.S
 )
 
-m = pattern.search(s)
+match = pattern.search(text)
 
-if not m:
-    print("NO_NAMED_CSRF_FUNCTION")
+if not match:
+    print("NO_CSRF_FUNCTION")
     raise SystemExit(0)
 
-brace = s.find("{", m.start())
+brace_start = text.find(
+    "{",
+    match.start()
+)
 
 depth = 0
 end = None
 
-for i in range(brace, len(s)):
+for index in range(
+    brace_start,
+    len(text)
+):
 
-    ch = s[i]
+    char = text[index]
 
-    if ch == "{":
+    if char == "{":
         depth += 1
 
-    elif ch == "}":
+    elif char == "}":
 
         depth -= 1
 
         if depth == 0:
-            end = i + 1
+            end = index + 1
             break
 
 if end is None:
     raise SystemExit(
-        "Could not safely parse csrfProtection"
+        "Could not safely parse csrfProtection."
     )
 
-new = r'''function csrfProtection(req, res, next) {
-  const mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+replacement = r'''function csrfProtection(req, res, next) {
+  const mutating = [
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE'
+  ].includes(req.method);
 
   const requestPath =
-    (req.originalUrl || req.url || req.path || '/')
+    (req.originalUrl ||
+     req.url ||
+     req.path ||
+     '/')
       .split('?')[0]
       .replace(/\/+$/, '') || '/';
 
@@ -894,7 +1226,8 @@ new = r'''function csrfProtection(req, res, next) {
     return next();
   }
 
-  const headerToken = req.get('x-csrf-token');
+  const headerToken =
+    req.get('x-csrf-token');
 
   if (
     !headerToken ||
@@ -905,73 +1238,107 @@ new = r'''function csrfProtection(req, res, next) {
     );
 
     return res.status(403).json({
-      error: 'Invalid or missing CSRF token'
+      error:
+        'Invalid or missing CSRF token'
     });
   }
 
   next();
 }'''
 
-s = s[:m.start()] + new + s[end:]
+text = (
+    text[:match.start()]
+    + replacement
+    + text[end:]
+)
 
-p.write_text(
-    s,
+path.write_text(
+    text,
     encoding="utf-8"
 )
 
-print("PATCHED_CSRF_FUNCTION")
+print("CSRF_PATCHED")
 PY
 
-"${NODE_BIN}" --check "${MAIN_JS}" \
-    || die "GKVM syntax check failed after CSRF patch."
+run_step \
+    "Validating application after auth compatibility check" \
+    "${NODE_BIN}" \
+        --check \
+        "${MAIN_JS}"
 
-ok "GKVM login compatibility check completed."
+success "Authentication compatibility check completed."
 
-line
+separator
 
 # ============================================================
 # FIREWALL
 # ============================================================
 
+section "NETWORK ACCESS"
+
 if command -v ufw >/dev/null 2>&1; then
 
     ufw allow "${PANEL_PORT}/tcp" \
-        >/dev/null 2>&1 || true
+        >/dev/null 2>&1 ||
+        true
+
+    success "UFW rule configured for port ${PANEL_PORT}."
 
 elif command -v firewall-cmd >/dev/null 2>&1; then
 
     firewall-cmd \
         --permanent \
         --add-port="${PANEL_PORT}/tcp" \
-        >/dev/null 2>&1 || true
+        >/dev/null 2>&1 ||
+        true
 
     firewall-cmd \
         --reload \
-        >/dev/null 2>&1 || true
+        >/dev/null 2>&1 ||
+        true
+
+    success "firewalld rule configured."
+
+else
+
+    warning "No UFW/firewalld detected."
+    detail "Make sure TCP ${PANEL_PORT} is reachable through your VPS firewall."
 
 fi
 
+separator
+
 # ============================================================
-# TEMPORARY DATABASE BOOTSTRAP
-# ============================================================
-#
-# Important:
-# GKVM itself creates:
-#
-#   users
-#   sessions
-#   vms
-#   settings
-#   etc.
-#
-# And GKVM itself creates the first admin using bcrypt.
-#
-# We therefore start the real application once, allow it to
-# initialize its SQLite database, stop it, then reset the real
-# admin password using the same bcryptjs library.
+# RUNTIME HELPERS
 # ============================================================
 
-info "Initializing GKVM database..."
+run_as_runtime() {
+
+    if [[ "${RUNTIME_USER}" == "root" ]]; then
+
+        env \
+            HOME="${RUNTIME_HOME}" \
+            PATH="${PATH}" \
+            "$@"
+
+    else
+
+        runuser \
+            -u "${RUNTIME_USER}" \
+            -- \
+            env \
+            HOME="${RUNTIME_HOME}" \
+            PATH="${PATH}" \
+            "$@"
+
+    fi
+}
+
+# ============================================================
+# DATABASE BOOTSTRAP
+# ============================================================
+
+section "DATABASE INITIALIZATION"
 
 rm -f "${BOOTSTRAP_LOG}"
 
@@ -979,151 +1346,87 @@ touch "${BOOTSTRAP_LOG}"
 
 chmod 640 "${BOOTSTRAP_LOG}"
 
-# Existing database gets preserved.
-# GKVM will initialize/migrate it automatically.
+info "Starting GKVM temporarily to discover its real database..."
 
-cd "${APP_DIR}"
+export BOOTSTRAP_NODE="${NODE_BIN}"
 
-# ============================================================
-# START BOOTSTRAP
-# ============================================================
+if [[ "${RUNTIME_USER}" == "root" ]]; then
 
-(
-    export NODE_ENV=production
-    export HOST=0.0.0.0
-    export PORT="${PANEL_PORT}"
-    export PANEL_NAME="GKVM Panel"
-    export SESSION_SECRET="${SESSION_SECRET}"
-    export LICENSE_MODE=disabled
-    export LICENSE_KEY=
-    export GKVM_INSTALL_DIR="${INSTALL_DIR}"
-    export GKVM_APP_DIR="${APP_DIR}"
-    export GKVM_DATA_DIR="${DATA_DIR}"
-    export GKVM_LOG_DIR="${LOG_DIR}"
+    (
+        export HOME="${RUNTIME_HOME}"
+        export NODE_ENV="production"
+        export HOST="0.0.0.0"
+        export PORT="${PANEL_PORT}"
+        export PANEL_NAME="GKVM Panel"
+        export SESSION_SECRET="${SESSION_SECRET}"
+        export LICENSE_MODE="disabled"
+        export LICENSE_KEY=""
+        export GKVM_INSTALL_DIR="${INSTALL_DIR}"
+        export GKVM_APP_DIR="${APP_DIR}"
+        export GKVM_DATA_DIR="${DATA_DIR}"
+        export GKVM_LOG_DIR="${LOG_DIR}"
 
-    exec "${NODE_BIN}" "${MAIN_JS}"
-) >>"${BOOTSTRAP_LOG}" 2>&1 &
+        exec "${NODE_BIN}" "${MAIN_JS}"
 
-BOOTSTRAP_PID=$!
+    ) >>"${BOOTSTRAP_LOG}" 2>&1 &
+
+    BOOTSTRAP_PID=$!
+
+else
+
+    runuser \
+        -u "${RUNTIME_USER}" \
+        -- \
+        env \
+        HOME="${RUNTIME_HOME}" \
+        NODE_ENV="production" \
+        HOST="0.0.0.0" \
+        PORT="${PANEL_PORT}" \
+        PANEL_NAME="GKVM Panel" \
+        SESSION_SECRET="${SESSION_SECRET}" \
+        LICENSE_MODE="disabled" \
+        LICENSE_KEY="" \
+        GKVM_INSTALL_DIR="${INSTALL_DIR}" \
+        GKVM_APP_DIR="${APP_DIR}" \
+        GKVM_DATA_DIR="${DATA_DIR}" \
+        GKVM_LOG_DIR="${LOG_DIR}" \
+        "${NODE_BIN}" \
+        "${MAIN_JS}" \
+        >>"${BOOTSTRAP_LOG}" 2>&1 &
+
+    BOOTSTRAP_PID=$!
+
+fi
 
 echo "${BOOTSTRAP_PID}" > "${PID_FILE}"
 
-info "Temporary GKVM process started (PID ${BOOTSTRAP_PID})."
+success "Temporary GKVM process started."
+detail "PID: ${BOOTSTRAP_PID}"
 
-DB_PATH="${DATA_DIR}/vnm.db"
+# ============================================================
+# DATABASE PATH DETECTION
+# ============================================================
 
-DATABASE_READY='false'
+DB_READY="false"
 
-for _ in {1..40}; do
+for _ in {1..60}; do
 
-    if [[ -f "${DB_PATH}" ]]; then
-
-        if "${NODE_BIN}" - "${DB_PATH}" <<'NODE' >/dev/null 2>&1
-const sqlite3 = require("sqlite3").verbose();
-
-const db = new sqlite3.Database(process.argv[2]);
-
-db.get(
-  "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
-  (err, row) => {
-    db.close();
-
-    if (err || !row) {
-      process.exit(1);
-    }
-
-    process.exit(0);
-  }
-);
-NODE
-        then
-
-            DATABASE_READY='true'
-            break
-
-        fi
-
-    fi
-
-    if ! kill -0 "${BOOTSTRAP_PID}" >/dev/null 2>&1; then
-        break
-    fi
-
-    sleep 1
-
-done
-
-if [[ "${DATABASE_READY}" != "true" ]]; then
-
-    # Fallback: search for vnm.db if the application used another
-    # custom database directory.
-
-    FOUND_DB="$(
-        find "${INSTALL_DIR}" \
-            -type f \
-            -name "vnm.db" \
-            -not -path '*/node_modules/*' \
-            -print \
-            -quit \
-            2>/dev/null || true
+    DB_PATH="$(
+        sed -n \
+            's/.*Database:[[:space:]]*\(.*\)$/\1/p' \
+            "${BOOTSTRAP_LOG}" |
+        tail -n 1 |
+        sed 's/[[:space:]]*$//' ||
+        true
     )"
 
-    if [[ -n "${FOUND_DB}" ]]; then
+    if [[ -n "${DB_PATH}" &&
+          -f "${DB_PATH}" ]]; then
 
-        DB_PATH="${FOUND_DB}"
-
-        if "${NODE_BIN}" - "${DB_PATH}" <<'NODE' >/dev/null 2>&1
-const sqlite3 = require("sqlite3").verbose();
-
-const db = new sqlite3.Database(process.argv[2]);
-
-db.get(
-  "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
-  (err, row) => {
-    db.close();
-
-    process.exit(err || !row ? 1 : 0);
-  }
-);
-NODE
-        then
-
-            DATABASE_READY='true'
-
-        fi
+        DB_READY="true"
+        break
 
     fi
-
-fi
-
-if [[ "${DATABASE_READY}" != "true" ]]; then
-
-    error "GKVM database initialization failed."
-
-    echo
-    echo "------------- GKVM BOOTSTRAP LOG ---------------"
-
-    tail -n 240 "${BOOTSTRAP_LOG}" || true
-
-    echo "-------------------------------------------------"
-
-    exit 1
-
-fi
-
-ok "GKVM database initialized."
-info "Database: ${DB_PATH}"
-
-# ============================================================
-# STOP TEMPORARY APP
-# ============================================================
-
-info "Stopping temporary GKVM process..."
-
-kill "${BOOTSTRAP_PID}" \
-    >/dev/null 2>&1 || true
-
-for _ in {1..30}; do
 
     if ! kill -0 "${BOOTSTRAP_PID}" \
         >/dev/null 2>&1; then
@@ -1132,102 +1435,291 @@ for _ in {1..30}; do
 
     fi
 
-    sleep 0.2
+    sleep 1
 
 done
 
-kill -9 "${BOOTSTRAP_PID}" \
-    >/dev/null 2>&1 || true
-
-wait "${BOOTSTRAP_PID}" \
-    >/dev/null 2>&1 || true
-
-BOOTSTRAP_PID=''
-
-rm -f "${PID_FILE}"
-
 # ============================================================
-# ADMIN PASSWORD
-# ============================================================
-#
-# IMPORTANT:
-# Do NOT use ADMIN_PASSWORD from .env.
-#
-# We update the actual "users" table with bcryptjs so the
-# password works with /api/login.
+# FALLBACK DATABASE SEARCH
 # ============================================================
 
-info "Creating secure GKVM admin password..."
+if [[ "${DB_READY}" != "true" ]]; then
 
-ADMIN_PASSWORD="$(
-    "${NODE_BIN}" -e '
-const crypto = require("crypto");
-process.stdout.write(
-    crypto.randomBytes(18).toString("base64url")
-);
-'
-)"
+    warning "GKVM did not expose its database path yet."
+    info "Searching known GKVM locations..."
 
-[[ -n "${ADMIN_PASSWORD}" ]] \
-    || die "Failed to generate admin password."
-
-if [[ ${#ADMIN_PASSWORD} -lt 16 ]]; then
-
-    ADMIN_PASSWORD="$(
-        "${NODE_BIN}" -e '
-const crypto = require("crypto");
-process.stdout.write(
-    "GKVM-" + crypto.randomBytes(16).toString("hex")
-);
-'
+    DB_PATH="$(
+        find \
+            "${RUNTIME_HOME}" \
+            "${INSTALL_DIR}" \
+            -type f \
+            -name "vnm.db" \
+            -not -path "*/node_modules/*" \
+            -print \
+            -quit \
+            2>/dev/null ||
+            true
     )"
+
+    if [[ -n "${DB_PATH}" &&
+          -f "${DB_PATH}" ]]; then
+
+        DB_READY="true"
+
+    fi
 
 fi
 
 # ============================================================
-# UPDATE REAL ADMIN DATABASE RECORD
+# DATABASE VALIDATION
 # ============================================================
 
-info "Updating real GKVM admin account..."
+if [[ "${DB_READY}" != "true" ]]; then
 
-"${NODE_BIN}" - "${DB_PATH}" "${ADMIN_PASSWORD}" <<'NODE'
+    echo
+    error_msg "Could not locate GKVM's real database."
+
+    echo
+    echo -e "${BRIGHT_YELLOW}GKVM bootstrap output:${RESET}"
+    tail -n 240 "${BOOTSTRAP_LOG}" || true
+
+    exit 1
+
+fi
+
+success "Real GKVM database found."
+
+detail "${DB_PATH}"
+
+# ============================================================
+# VERIFY USERS TABLE
+# ============================================================
+
+DB_CHECK="$(
+    "${NODE_BIN}" \
+        - "${DB_PATH}" \
+        <<'NODE'
+const sqlite3 = require("sqlite3").verbose();
+
+const db = new sqlite3.Database(
+  process.argv[2]
+);
+
+db.get(
+  `
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+      AND name = 'users'
+  `,
+  (err, row) => {
+
+    db.close();
+
+    if (err || !row) {
+      process.exit(1);
+    }
+
+    process.stdout.write(
+      "USERS_TABLE_OK"
+    );
+  }
+);
+NODE
+)"
+
+[[ "${DB_CHECK}" == "USERS_TABLE_OK" ]] ||
+    die "GKVM users table was not created."
+
+success "GKVM users table verified."
+
+# ============================================================
+# STOP BOOTSTRAP
+# ============================================================
+
+info "Stopping temporary GKVM instance..."
+
+kill "${BOOTSTRAP_PID}" \
+    >/dev/null 2>&1 ||
+    true
+
+for _ in {1..40}; do
+
+    if ! kill -0 "${BOOTSTRAP_PID}" \
+        >/dev/null 2>&1; then
+
+        break
+
+    fi
+
+    sleep 0.25
+
+done
+
+kill -9 "${BOOTSTRAP_PID}" \
+    >/dev/null 2>&1 ||
+    true
+
+wait "${BOOTSTRAP_PID}" \
+    >/dev/null 2>&1 ||
+    true
+
+BOOTSTRAP_PID=""
+
+rm -f "${PID_FILE}"
+
+sleep 1
+
+success "Temporary instance stopped."
+
+separator
+
+# ============================================================
+# DATABASE BACKUP
+# ============================================================
+
+section "DATABASE SAFETY"
+
+if [[ -f "${DB_PATH}" ]]; then
+
+    DB_BACKUP="${BACKUP_DIR}/$(basename "${DB_PATH}").$(date +%Y%m%d-%H%M%S).bak"
+
+    cp -a \
+        "${DB_PATH}" \
+        "${DB_BACKUP}"
+
+    success "Database backup created."
+
+    detail "${DB_BACKUP}"
+
+fi
+
+if [[ -f "${DB_PATH}-wal" ]]; then
+
+    cp -a \
+        "${DB_PATH}-wal" \
+        "${DB_BACKUP}-wal" ||
+        true
+
+fi
+
+if [[ -f "${DB_PATH}-shm" ]]; then
+
+    cp -a \
+        "${DB_PATH}-shm" \
+        "${DB_BACKUP}-shm" ||
+        true
+
+fi
+
+separator
+
+# ============================================================
+# ADMIN PASSWORD
+# ============================================================
+
+section "ADMIN SECURITY"
+
+ADMIN_USERNAME="admin"
+
+ADMIN_PASSWORD="$(
+    "${NODE_BIN}" \
+        -e '
+          const crypto = require("crypto");
+          process.stdout.write(
+            crypto.randomBytes(18).toString("base64url")
+          );
+        '
+)"
+
+[[ -n "${ADMIN_PASSWORD}" ]] ||
+    die "Could not generate admin password."
+
+if (( ${#ADMIN_PASSWORD} < 16 )); then
+
+    ADMIN_PASSWORD="$(
+        "${NODE_BIN}" \
+            -e '
+              const crypto = require("crypto");
+              process.stdout.write(
+                "GKVM-" +
+                crypto.randomBytes(16).toString("hex")
+              );
+            '
+    )"
+
+fi
+
+info "Generated secure admin password."
+
+# ============================================================
+# REAL BCRYPT ADMIN UPDATE
+# ============================================================
+
+ADMIN_RESULT="$(
+    "${NODE_BIN}" \
+        - "${DB_PATH}" "${ADMIN_PASSWORD}" \
+        <<'NODE'
 const sqlite3 = require("sqlite3").verbose();
 const bcrypt = require("bcryptjs");
 
 const dbPath = process.argv[2];
 const password = process.argv[3];
 
-const hash = bcrypt.hashSync(password, 10);
+const hash = bcrypt.hashSync(
+  password,
+  10
+);
 
-const db = new sqlite3.Database(dbPath);
+const db = new sqlite3.Database(
+  dbPath
+);
 
 function finish(code) {
-  db.close(() => process.exit(code));
+  db.close(() => {
+    process.exit(code);
+  });
 }
 
 db.serialize(() => {
 
   db.get(
-    "SELECT id FROM users WHERE username = ? LIMIT 1",
+    `
+      SELECT id
+      FROM users
+      WHERE username = ?
+      LIMIT 1
+    `,
     ["admin"],
-    (selectErr, row) => {
+    (selectErr, user) => {
 
       if (selectErr) {
+
         console.error(
-          "Could not query admin:",
+          "Admin query failed:",
           selectErr.message
         );
 
         finish(1);
         return;
+
       }
 
-      if (!row) {
+      if (!user) {
 
         db.run(
-          `INSERT INTO users
-           (username, password, email, full_name, role, is_active)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `
+            INSERT INTO users
+            (
+              username,
+              password,
+              email,
+              full_name,
+              role,
+              is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+          `,
           [
             "admin",
             hash,
@@ -1239,13 +1731,15 @@ db.serialize(() => {
           (insertErr) => {
 
             if (insertErr) {
+
               console.error(
-                "Could not create admin:",
+                "Admin creation failed:",
                 insertErr.message
               );
 
               finish(1);
               return;
+
             }
 
             console.log(
@@ -1253,75 +1747,106 @@ db.serialize(() => {
             );
 
             finish(0);
+
           }
         );
 
         return;
       }
 
-      // Reset the existing admin.
-      //
-      // Also disable 2FA during installation/reset so a newly
-      // generated installer credential is usable immediately.
+      db.all(
+        "PRAGMA table_info(users)",
+        (pragmaErr, columns) => {
 
-      db.run(
-        `UPDATE users
-         SET password = ?,
-             role = 'admin',
-             is_active = 1,
-             email = COALESCE(email, 'admin@gkvm.local'),
-             full_name = COALESCE(full_name, 'GKVM Administrator'),
-             totp_enabled = 0,
-             totp_secret = NULL,
-             totp_recovery_codes = NULL
-         WHERE username = 'admin'`,
-        [hash],
-        function(updateErr) {
+          if (pragmaErr) {
 
-          if (updateErr) {
-
-            // Older databases may not have TOTP columns.
-            // Fall back to the compatible update.
-
-            db.run(
-              `UPDATE users
-               SET password = ?,
-                   role = 'admin',
-                   is_active = 1,
-                   email = COALESCE(email, 'admin@gkvm.local'),
-                   full_name = COALESCE(full_name, 'GKVM Administrator')
-               WHERE username = 'admin'`,
-              [hash],
-              function(fallbackErr) {
-
-                if (fallbackErr) {
-
-                  console.error(
-                    "Could not update admin:",
-                    fallbackErr.message
-                  );
-
-                  finish(1);
-                  return;
-
-                }
-
-                console.log(
-                  "ADMIN_UPDATED"
-                );
-
-                finish(0);
-              }
+            console.error(
+              "Could not inspect users table:",
+              pragmaErr.message
             );
 
+            finish(1);
             return;
+
           }
 
-          console.log(
-            "ADMIN_UPDATED"
+          const names = new Set(
+            columns.map(
+              column => column.name
+            )
           );
 
-          finish(0);
+          const updates = [
+            "password = ?",
+            "role = 'admin'",
+            "is_active = 1"
+          ];
+
+          const values = [
+            hash
+          ];
+
+          if (names.has("totp_enabled")) {
+            updates.push(
+              "totp_enabled = 0"
+            );
+          }
+
+          if (names.has("totp_secret")) {
+            updates.push(
+              "totp_secret = NULL"
+            );
+          }
+
+          if (names.has("totp_recovery_codes")) {
+            updates.push(
+              "totp_recovery_codes = NULL"
+            );
+          }
+
+          const sql = `
+            UPDATE users
+            SET ${updates.join(", ")}
+            WHERE username = 'admin'
+          `;
+
+          db.run(
+            sql,
+            values,
+            function(updateErr) {
+
+              if (updateErr) {
+
+                console.error(
+                  "Admin password update failed:",
+                  updateErr.message
+                );
+
+                finish(1);
+                return;
+
+              }
+
+              if (this.changes !== 1) {
+
+                console.error(
+                  "Admin account was not updated."
+                );
+
+                finish(1);
+                return;
+
+              }
+
+              console.log(
+                "ADMIN_UPDATED"
+              );
+
+              finish(0);
+
+            }
+          );
+
         }
       );
 
@@ -1330,8 +1855,101 @@ db.serialize(() => {
 
 });
 NODE
+)"
 
-ok "Real GKVM admin account configured."
+if [[ "${ADMIN_RESULT}" == "ADMIN_CREATED" ]]; then
+
+    success "Real GKVM admin account created."
+
+else
+
+    success "Real GKVM admin password reset."
+
+fi
+
+# ============================================================
+# VERIFY CREDENTIALS
+# ============================================================
+
+section "LOGIN VERIFICATION"
+
+LOGIN_TEST="$(
+    "${NODE_BIN}" \
+        - "${DB_PATH}" "${ADMIN_PASSWORD}" \
+        <<'NODE'
+const sqlite3 = require("sqlite3").verbose();
+const bcrypt = require("bcryptjs");
+
+const db = new sqlite3.Database(
+  process.argv[2]
+);
+
+const password = process.argv[3];
+
+db.get(
+  `
+    SELECT username, password, role, is_active
+    FROM users
+    WHERE username = 'admin'
+    LIMIT 1
+  `,
+  (err, row) => {
+
+    if (err) {
+
+      console.error(
+        err.message
+      );
+
+      db.close();
+      process.exit(1);
+
+    }
+
+    if (!row) {
+
+      console.error(
+        "Admin user missing."
+      );
+
+      db.close();
+      process.exit(1);
+
+    }
+
+    const valid =
+      bcrypt.compareSync(
+        password,
+        row.password
+      );
+
+    db.close();
+
+    if (
+      valid &&
+      row.role === "admin" &&
+      Number(row.is_active) === 1
+    ) {
+
+      process.stdout.write(
+        "LOGIN_VALID"
+      );
+
+      process.exit(0);
+
+    }
+
+    process.exit(1);
+
+  }
+);
+NODE
+)"
+
+[[ "${LOGIN_TEST}" == "LOGIN_VALID" ]] ||
+    die "Generated GKVM admin credentials failed verification."
+
+success "Admin username/password verified against bcrypt."
 
 # ============================================================
 # SAVE CREDENTIALS
@@ -1362,308 +1980,51 @@ $(date -Is)
 IMPORTANT
 ============================================================
 
-This password belongs to the real GKVM "users" database.
+This is the REAL GKVM administrator password.
 
-GKVM uses bcrypt for password verification.
+It was bcrypt-hashed and verified directly against
+the GKVM users database.
 
-Keep this file private.
+Do not share this file publicly.
 ============================================================
 EOF
 
 chmod 600 "${CREDENTIAL_FILE}"
-
 chown root:root "${CREDENTIAL_FILE}"
 
-ok "Admin credentials saved."
+success "Verified credentials saved."
 
-line
-
-# ============================================================
-# APP PERMISSIONS
-# ============================================================
-
-if [[ "${HAS_SYSTEMD}" == "true" ]]; then
-
-    # systemd runs the panel as root for VM/QEMU operations.
-
-    chown -R root:root \
-        "${APP_DIR}" \
-        "${DATA_DIR}" \
-        "${LOG_DIR}"
-
-else
-
-    # Codespaces/containers:
-    # allow the user who invoked sudo to run gkvm start manually.
-
-    if [[ "${RUN_USER}" != "root" ]]; then
-
-        chown -R \
-            "${RUN_USER}:${RUN_GROUP}" \
-            "${APP_DIR}" \
-            "${DATA_DIR}" \
-            "${LOG_DIR}"
-
-        # Credentials/config stay protected under /etc/gkvm.
-
-    fi
-
-fi
-
-# Keep application writable.
-chmod -R u+rwX,go+rX "${APP_DIR}"
-
-mkdir -p "${APP_DIR}/data"
-
-chmod 755 "${APP_DIR}/data"
-
-line
+separator
 
 # ============================================================
-# MANAGEMENT COMMAND
+# RUNTIME CONFIG
 # ============================================================
 
-info "Installing gkvm management command..."
-
-cat > "${MANAGER_FILE}" <<'EOF'
-#!/usr/bin/env bash
-
-set -u
-
-SERVICE_NAME="gkvm-panel"
-
-INSTALL_DIR="/opt/gkvm"
-APP_DIR="${INSTALL_DIR}/app"
-LOG_DIR="${INSTALL_DIR}/logs"
-
-LOG_FILE="${LOG_DIR}/gkvm.log"
-PID_FILE="${INSTALL_DIR}/gkvm.pid"
-
-CREDENTIAL_FILE="/etc/gkvm/admin-credentials.txt"
-
-NODE_BIN="$(command -v node 2>/dev/null || true)"
-MAIN_JS="${APP_DIR}/app.js"
-
-has_systemd() {
-
-    command -v systemctl >/dev/null 2>&1 &&
-    [[ -d /run/systemd/system ]]
-
-}
-
-start_standalone() {
-
-    mkdir -p "${LOG_DIR}" "${APP_DIR}/data"
-
-    if [[ -f "${PID_FILE}" ]]; then
-
-        PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
-
-        if [[ "${PID}" =~ ^[0-9]+$ ]] &&
-            kill -0 "${PID}" >/dev/null 2>&1; then
-
-            echo "GKVM is already running."
-            echo "PID: ${PID}"
-
-            return 0
-
-        fi
-
-        rm -f "${PID_FILE}"
-
-    fi
-
-    echo "Starting GKVM..."
-
-    nohup "${NODE_BIN}" "${MAIN_JS}" \
-        >>"${LOG_FILE}" 2>&1 &
-
-    PID=$!
-
-    echo "${PID}" > "${PID_FILE}"
-
-    sleep 3
-
-    if kill -0 "${PID}" >/dev/null 2>&1; then
-
-        echo "GKVM started."
-        echo "PID: ${PID}"
-
-        return 0
-
-    fi
-
-    echo "GKVM failed to start."
-
-    tail -n 100 "${LOG_FILE}" || true
-
-    return 1
-
-}
-
-stop_standalone() {
-
-    if [[ ! -f "${PID_FILE}" ]]; then
-
-        echo "GKVM is not running."
-
-        return 0
-
-    fi
-
-    PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
-
-    if [[ "${PID}" =~ ^[0-9]+$ ]]; then
-
-        kill "${PID}" \
-            >/dev/null 2>&1 || true
-
-    fi
-
-    rm -f "${PID_FILE}"
-
-    echo "GKVM stopped."
-
-}
-
-status_standalone() {
-
-    if [[ -f "${PID_FILE}" ]]; then
-
-        PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
-
-        if [[ "${PID}" =~ ^[0-9]+$ ]] &&
-            kill -0 "${PID}" >/dev/null 2>&1; then
-
-            echo "GKVM: RUNNING"
-            echo "PID : ${PID}"
-
-            return 0
-
-        fi
-
-    fi
-
-    echo "GKVM: STOPPED"
-
-}
-
-case "${1:-status}" in
-
-    start)
-
-        if has_systemd; then
-            systemctl start "${SERVICE_NAME}"
-        else
-            start_standalone
-        fi
-
-        ;;
-
-    stop)
-
-        if has_systemd; then
-            systemctl stop "${SERVICE_NAME}"
-        else
-            stop_standalone
-        fi
-
-        ;;
-
-    restart)
-
-        if has_systemd; then
-
-            systemctl restart "${SERVICE_NAME}"
-
-        else
-
-            stop_standalone
-            sleep 1
-            start_standalone
-
-        fi
-
-        ;;
-
-    status)
-
-        if has_systemd then
-            systemctl status "${SERVICE_NAME}" --no-pager
-        else
-            status_standalone
-        fi
-
-        ;;
-
-    logs)
-
-        if has_systemd; then
-            journalctl -u "${SERVICE_NAME}" -f
-        else
-            tail -f "${LOG_FILE}"
-        fi
-
-        ;;
-
-    credentials)
-
-        if [[ -r "${CREDENTIAL_FILE}" ]]; then
-
-            cat "${CREDENTIAL_FILE}"
-
-        else
-
-            echo "Use:"
-            echo "  sudo gkvm credentials"
-
-            exit 1
-
-        fi
-
-        ;;
-
-    *)
-
-        echo
-        echo "GKVM Management"
-        echo
-        echo "Usage:"
-        echo "  gkvm start"
-        echo "  gkvm stop"
-        echo "  gkvm restart"
-        echo "  gkvm status"
-        echo "  gkvm logs"
-        echo "  gkvm credentials"
-        echo
-
-        exit 1
-
-        ;;
-
-esac
+section "RUNTIME CONFIGURATION"
+
+cat > "${RUNTIME_FILE}" <<EOF
+RUNTIME_USER=$(printf '%q' "${RUNTIME_USER}")
+RUNTIME_GROUP=$(printf '%q' "${RUNTIME_GROUP}")
+RUNTIME_HOME=$(printf '%q' "${RUNTIME_HOME}")
+DB_PATH=$(printf '%q' "${DB_PATH}")
+PANEL_PORT=$(printf '%q' "${PANEL_PORT}")
 EOF
 
-# Fix the deliberate shell syntax line safely.
-sed -i 's/if has_systemd then/if has_systemd; then/' "${MANAGER_FILE}"
-
-chmod 755 "${MANAGER_FILE}"
-
-ok "GKVM management command installed."
-
-line
+chmod 640 "${RUNTIME_FILE}"
+chown root:root "${RUNTIME_FILE}"
 
 # ============================================================
-# SYSTEMD SERVICE
+# SYSTEMD
 # ============================================================
 
 if [[ "${HAS_SYSTEMD}" == "true" ]]; then
 
-    info "Creating GKVM systemd service..."
+    info "Building systemd service..."
 
     cat > "${SERVICE_FILE}" <<EOF
 [Unit]
-Description=GKVM Panel
+Description=GKVM Panel - Virtual Machine Management
+Documentation=${REPO_URL}
 After=network-online.target
 Wants=network-online.target
 
@@ -1696,102 +2057,721 @@ EOF
 
     chmod 644 "${SERVICE_FILE}"
 
-    systemd-analyze verify \
-        "${SERVICE_FILE}" \
-        || die "systemd service validation failed."
+    run_step \
+        "Validating systemd service" \
+        systemd-analyze verify \
+            "${SERVICE_FILE}"
 
-    systemctl daemon-reload
+    run_step \
+        "Reloading systemd" \
+        systemctl daemon-reload
 
-    systemctl enable \
-        "${SERVICE_NAME}" \
-        >/dev/null 2>&1
+    run_step \
+        "Enabling GKVM service" \
+        systemctl enable "${SERVICE_NAME}"
 
     : > "${LOG_FILE}"
 
-    info "Starting GKVM service..."
+else
 
-    systemctl restart "${SERVICE_NAME}"
+    warning "systemd service skipped."
+    detail "GKVM will use standalone process mode."
 
-    sleep 5
+fi
 
-    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+# ============================================================
+# MANAGEMENT CLI
+# ============================================================
 
-        ok "GKVM service is ONLINE."
+section "GKVM MANAGEMENT CLI"
+
+cat > "${MANAGER_FILE}" <<'GKVM_MANAGER'
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SERVICE_NAME="gkvm-panel"
+
+INSTALL_DIR="/opt/gkvm"
+APP_DIR="${INSTALL_DIR}/app"
+LOG_DIR="${INSTALL_DIR}/logs"
+
+LOG_FILE="${LOG_DIR}/gkvm.log"
+PID_FILE="${INSTALL_DIR}/gkvm.pid"
+
+CONFIG_DIR="/etc/gkvm"
+RUNTIME_FILE="${CONFIG_DIR}/runtime.conf"
+CREDENTIAL_FILE="${CONFIG_DIR}/admin-credentials.txt"
+
+MAIN_JS="${APP_DIR}/app.js"
+
+NODE_BIN="$(
+    readlink -f "$(command -v node)" 2>/dev/null ||
+    command -v node
+)"
+
+if [[ -f "${RUNTIME_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${RUNTIME_FILE}"
+fi
+
+RUNTIME_USER="${RUNTIME_USER:-root}"
+RUNTIME_GROUP="${RUNTIME_GROUP:-root}"
+RUNTIME_HOME="${RUNTIME_HOME:-/root}"
+DB_PATH="${DB_PATH:-}"
+
+has_systemd() {
+
+    command -v systemctl >/dev/null 2>&1 &&
+    [[ -d /run/systemd/system ]]
+
+}
+
+as_runtime() {
+
+    if [[ "${RUNTIME_USER}" == "root" ]]; then
+
+        env \
+            HOME="${RUNTIME_HOME}" \
+            "$@"
+
+    elif [[ "${EUID}" -eq 0 ]]; then
+
+        runuser \
+            -u "${RUNTIME_USER}" \
+            -- \
+            env \
+            HOME="${RUNTIME_HOME}" \
+            "$@"
+
+    elif [[ "$(id -un)" == "${RUNTIME_USER}" ]]; then
+
+        env \
+            HOME="${RUNTIME_HOME}" \
+            "$@"
 
     else
 
-        error "GKVM service failed to start."
-
-        systemctl status \
-            "${SERVICE_NAME}" \
-            --no-pager \
-            --full || true
-
-        journalctl \
-            -u "${SERVICE_NAME}" \
-            -n 200 \
-            --no-pager || true
-
+        echo "Run this command as ${RUNTIME_USER} or with sudo."
         exit 1
 
     fi
 
-# ============================================================
-# STANDALONE MODE
-# ============================================================
+}
 
-else
+standalone_status() {
 
-    info "Starting GKVM in standalone/background mode..."
+    if [[ -f "${PID_FILE}" ]]; then
 
-    : > "${LOG_FILE}"
+        PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
 
-    if [[ "${RUN_USER}" == "root" ]]; then
+        if [[ "${PID}" =~ ^[0-9]+$ ]] &&
+           kill -0 "${PID}" >/dev/null 2>&1; then
 
-        nohup "${NODE_BIN}" "${MAIN_JS}" \
-            >>"${LOG_FILE}" 2>&1 &
+            echo "GKVM: RUNNING"
+            echo "PID : ${PID}"
 
-        GKVM_PID=$!
-
-    else
-
-        # Run as the Codespaces/container user.
-        #
-        # This prevents EACCES when the user later runs
-        # gkvm restart/status.
-
-        su -s /bin/bash "${RUN_USER}" -c \
-            "cd '${APP_DIR}' && nohup '${NODE_BIN}' '${MAIN_JS}' >>'${LOG_FILE}' 2>&1 & echo \$!" \
-            > "${PID_FILE}"
-
-        GKVM_PID="$(cat "${PID_FILE}")"
-
-        if [[ ! "${GKVM_PID}" =~ ^[0-9]+$ ]]; then
-
-            die "Could not obtain GKVM standalone PID."
+            return 0
 
         fi
 
     fi
 
-    echo "${GKVM_PID}" > "${PID_FILE}"
+    echo "GKVM: STOPPED"
 
-    sleep 5
+}
 
-    if kill -0 "${GKVM_PID}" >/dev/null 2>&1; then
+standalone_start() {
 
-        ok "GKVM process is running (PID ${GKVM_PID})."
+    mkdir -p \
+        "${LOG_DIR}" \
+        "${APP_DIR}/data"
+
+    if [[ -f "${PID_FILE}" ]]; then
+
+        PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
+
+        if [[ "${PID}" =~ ^[0-9]+$ ]] &&
+           kill -0 "${PID}" >/dev/null 2>&1; then
+
+            echo "GKVM is already running."
+            echo "PID: ${PID}"
+
+            return 0
+
+        fi
+
+        rm -f "${PID_FILE}"
+
+    fi
+
+    echo "Starting GKVM..."
+
+    if [[ "${RUNTIME_USER}" == "root" ||
+          "${EUID}" -eq 0 ]]; then
+
+        as_runtime \
+            nohup "${NODE_BIN}" "${MAIN_JS}" \
+            >>"${LOG_FILE}" 2>&1 &
+
+        PID=$!
 
     else
 
-        error "GKVM process exited during startup."
+        if [[ "$(id -un)" != "${RUNTIME_USER}" ]]; then
+
+            echo "Use: sudo gkvm start"
+            exit 1
+
+        fi
+
+        (
+            cd "${APP_DIR}"
+
+            nohup \
+                "${NODE_BIN}" \
+                "${MAIN_JS}" \
+                >>"${LOG_FILE}" 2>&1
+        ) &
+
+        PID=$!
+
+    fi
+
+    echo "${PID}" > "${PID_FILE}"
+
+    sleep 3
+
+    if kill -0 "${PID}" >/dev/null 2>&1; then
+
+        echo "GKVM started."
+        echo "PID: ${PID}"
+
+    else
+
+        echo "GKVM failed to start."
+
+        tail -n 100 \
+            "${LOG_FILE}" ||
+            true
+
+        exit 1
+
+    fi
+
+}
+
+standalone_stop() {
+
+    if [[ ! -f "${PID_FILE}" ]]; then
+
+        echo "GKVM is not running."
+
+        return 0
+
+    fi
+
+    PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
+
+    if [[ "${PID}" =~ ^[0-9]+$ ]]; then
+
+        kill "${PID}" \
+            >/dev/null 2>&1 ||
+            true
+
+    fi
+
+    rm -f "${PID_FILE}"
+
+    echo "GKVM stopped."
+
+}
+
+show_credentials() {
+
+    if [[ "${EUID}" -ne 0 &&
+          ! -r "${CREDENTIAL_FILE}" ]]; then
+
+        echo "Credentials are protected."
+        echo
+        echo "Run:"
+        echo
+        echo "  sudo gkvm credentials"
+
+        exit 1
+
+    fi
+
+    cat "${CREDENTIAL_FILE}"
+
+}
+
+reset_admin() {
+
+    if [[ "${EUID}" -ne 0 ]]; then
+
+        echo "Admin reset requires root access."
+        echo "Running with sudo..."
+
+        exec sudo "$0" reset-admin
+
+    fi
+
+    [[ -n "${DB_PATH}" &&
+       -f "${DB_PATH}" ]] ||
+        {
+            echo "GKVM database not found."
+            exit 1
+        }
+
+    NEW_PASSWORD="$(
+        "${NODE_BIN}" \
+            -e '
+              const crypto = require("crypto");
+              process.stdout.write(
+                crypto.randomBytes(18).toString("base64url")
+              );
+            '
+    )"
+
+    "${NODE_BIN}" \
+        - "${DB_PATH}" "${NEW_PASSWORD}" \
+        <<'NODE'
+const sqlite3 = require("sqlite3").verbose();
+const bcrypt = require("bcryptjs");
+
+const dbPath = process.argv[2];
+const password = process.argv[3];
+
+const hash = bcrypt.hashSync(
+  password,
+  10
+);
+
+const db = new sqlite3.Database(
+  dbPath
+);
+
+db.all(
+  "PRAGMA table_info(users)",
+  (pragmaErr, columns) => {
+
+    if (pragmaErr) {
+      console.error(pragmaErr.message);
+      process.exit(1);
+    }
+
+    const names =
+      new Set(columns.map(c => c.name));
+
+    const updates = [
+      "password = ?",
+      "role = 'admin'",
+      "is_active = 1"
+    ];
+
+    if (names.has("totp_enabled")) {
+      updates.push(
+        "totp_enabled = 0"
+      );
+    }
+
+    if (names.has("totp_secret")) {
+      updates.push(
+        "totp_secret = NULL"
+      );
+    }
+
+    if (names.has("totp_recovery_codes")) {
+      updates.push(
+        "totp_recovery_codes = NULL"
+      );
+    }
+
+    const hashValue = hash;
+
+    db.run(
+      `
+        UPDATE users
+        SET ${updates.join(", ")}
+        WHERE username = 'admin'
+      `,
+      [hashValue],
+      function(err) {
+
+        if (err) {
+          console.error(err.message);
+          process.exit(1);
+        }
+
+        if (this.changes !== 1) {
+          console.error(
+            "Admin account does not exist."
+          );
+          process.exit(1);
+        }
+
+        db.close(() => {
+          process.stdout.write(
+            password
+          );
+        });
+
+      }
+    );
+
+  }
+);
+NODE
+
+    # Rewrite credential file.
+    cat > "${CREDENTIAL_FILE}" <<EOF
+============================================================
+                    GKVM PANEL
+                 ADMIN CREDENTIALS
+============================================================
+
+Username:
+admin
+
+Password:
+${NEW_PASSWORD}
+
+Database:
+${DB_PATH}
+
+Generated:
+$(date -Is)
+
+============================================================
+EOF
+
+    chmod 600 "${CREDENTIAL_FILE}"
+
+    echo
+    echo "============================================================"
+    echo "              GKVM ADMIN PASSWORD RESET"
+    echo "============================================================"
+    echo
+    echo "Username : admin"
+    echo "Password : ${NEW_PASSWORD}"
+    echo
+    echo "Credential file:"
+    echo "${CREDENTIAL_FILE}"
+    echo
+    echo "============================================================"
+
+}
+
+health() {
+
+    echo
+    echo "GKVM HEALTH"
+    echo "-----------"
+
+    if command -v ss >/dev/null 2>&1; then
+
+        if ss -ltn |
+            grep -Eq ":${PANEL_PORT:-8080}([[:space:]]|$)"; then
+
+            echo "Port 8080 : ONLINE"
+
+        else
+
+            echo "Port 8080 : OFFLINE"
+
+        fi
+
+    fi
+
+    STATUS="$(
+        curl \
+            -sS \
+            -o /dev/null \
+            -w '%{http_code}' \
+            --max-time 5 \
+            "http://127.0.0.1:${PANEL_PORT:-8080}/" \
+            2>/dev/null ||
+            true
+    )"
+
+    echo "HTTP       : ${STATUS:-NO RESPONSE}"
+
+}
+
+info_screen() {
+
+    echo
+    echo "============================================================"
+    echo "                       GKVM INFO"
+    echo "============================================================"
+    echo
+    echo "Install directory : ${INSTALL_DIR}"
+    echo "Application       : ${APP_DIR}"
+    echo "Database          : ${DB_PATH:-unknown}"
+    echo "Runtime user      : ${RUNTIME_USER}"
+    echo "Runtime home      : ${RUNTIME_HOME}"
+    echo "Port              : ${PANEL_PORT:-8080}"
+    echo "Credentials       : ${CREDENTIAL_FILE}"
+    echo
+    echo "============================================================"
+
+}
+
+case "${1:-status}" in
+
+    start)
+
+        if has_systemd; then
+
+            if [[ "${EUID}" -eq 0 ]]; then
+                systemctl start "${SERVICE_NAME}"
+            else
+                sudo systemctl start "${SERVICE_NAME}"
+            fi
+
+        else
+
+            standalone_start
+
+        fi
+
+        ;;
+
+    stop)
+
+        if has_systemd; then
+
+            if [[ "${EUID}" -eq 0 ]]; then
+                systemctl stop "${SERVICE_NAME}"
+            else
+                sudo systemctl stop "${SERVICE_NAME}"
+            fi
+
+        else
+
+            standalone_stop
+
+        fi
+
+        ;;
+
+    restart)
+
+        if has_systemd; then
+
+            if [[ "${EUID}" -eq 0 ]]; then
+                systemctl restart "${SERVICE_NAME}"
+            else
+                sudo systemctl restart "${SERVICE_NAME}"
+            fi
+
+        else
+
+            standalone_stop
+            sleep 1
+            standalone_start
+
+        fi
+
+        ;;
+
+    status)
+
+        if has_systemd; then
+
+            if [[ "${EUID}" -eq 0 ]]; then
+                systemctl status "${SERVICE_NAME}" --no-pager
+            else
+                sudo systemctl status "${SERVICE_NAME}" --no-pager
+            fi
+
+        else
+
+            standalone_status
+
+        fi
+
+        ;;
+
+    logs)
+
+        if has_systemd; then
+
+            if [[ "${EUID}" -eq 0 ]]; then
+                journalctl -u "${SERVICE_NAME}" -f
+            else
+                sudo journalctl -u "${SERVICE_NAME}" -f
+            fi
+
+        else
+
+            tail -f "${LOG_FILE}"
+
+        fi
+
+        ;;
+
+    credentials)
+
+        show_credentials
+
+        ;;
+
+    reset-admin)
+
+        reset_admin
+
+        ;;
+
+    health)
+
+        health
+
+        ;;
+
+    info)
+
+        info_screen
+
+        ;;
+
+    *)
 
         echo
-        echo "------------- GKVM STARTUP LOG ---------------"
+        echo "GKVM MANAGEMENT"
+        echo
+        echo "  gkvm start"
+        echo "  gkvm stop"
+        echo "  gkvm restart"
+        echo "  gkvm status"
+        echo "  gkvm logs"
+        echo "  gkvm health"
+        echo "  gkvm info"
+        echo "  gkvm credentials"
+        echo "  sudo gkvm reset-admin"
+        echo
 
-        tail -n 240 "${LOG_FILE}" || true
+        ;;
 
-        echo "-----------------------------------------------"
+esac
+GKVM_MANAGER
+
+chmod 755 "${MANAGER_FILE}"
+
+success "GKVM management CLI installed."
+
+separator
+
+# ============================================================
+# START GKVM
+# ============================================================
+
+section "GKVM STARTUP"
+
+if [[ "${HAS_SYSTEMD}" == "true" ]]; then
+
+    : > "${LOG_FILE}"
+
+    run_step \
+        "Reloading systemd configuration" \
+        systemctl daemon-reload
+
+    run_step \
+        "Starting GKVM service" \
+        systemctl restart "${SERVICE_NAME}"
+
+    sleep 3
+
+    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+
+        success "GKVM systemd service is ONLINE."
+
+    else
+
+        error_msg "GKVM service did not remain online."
+
+        systemctl status \
+            "${SERVICE_NAME}" \
+            --no-pager \
+            --full ||
+            true
+
+        echo
+        tail -n 160 "${LOG_FILE}" || true
+
+        exit 1
+
+    fi
+
+else
+
+    : > "${LOG_FILE}"
+
+    if [[ "${RUNTIME_USER}" == "root" ]]; then
+
+        (
+            export HOME="${RUNTIME_HOME}"
+            export NODE_ENV="production"
+            export HOST="0.0.0.0"
+            export PORT="${PANEL_PORT}"
+            export PANEL_NAME="GKVM Panel"
+            export LICENSE_MODE="disabled"
+            export LICENSE_KEY=""
+            export GKVM_INSTALL_DIR="${INSTALL_DIR}"
+            export GKVM_APP_DIR="${APP_DIR}"
+            export GKVM_DATA_DIR="${DATA_DIR}"
+            export GKVM_LOG_DIR="${LOG_DIR}"
+
+            nohup \
+                "${NODE_BIN}" \
+                "${MAIN_JS}" \
+                >>"${LOG_FILE}" 2>&1
+        ) &
+
+        GKVM_PID=$!
+
+    else
+
+        runuser \
+            -u "${RUNTIME_USER}" \
+            -- \
+            env \
+            HOME="${RUNTIME_HOME}" \
+            NODE_ENV="production" \
+            HOST="0.0.0.0" \
+            PORT="${PANEL_PORT}" \
+            PANEL_NAME="GKVM Panel" \
+            LICENSE_MODE="disabled" \
+            LICENSE_KEY="" \
+            GKVM_INSTALL_DIR="${INSTALL_DIR}" \
+            GKVM_APP_DIR="${APP_DIR}" \
+            GKVM_DATA_DIR="${DATA_DIR}" \
+            GKVM_LOG_DIR="${LOG_DIR}" \
+            nohup \
+            "${NODE_BIN}" \
+            "${MAIN_JS}" \
+            >>"${LOG_FILE}" 2>&1 &
+
+        GKVM_PID=$!
+
+    fi
+
+    echo "${GKVM_PID}" > "${PID_FILE}"
+
+    sleep 4
+
+    if kill -0 "${GKVM_PID}" >/dev/null 2>&1; then
+
+        success "GKVM standalone process is ONLINE."
+
+        detail "PID: ${GKVM_PID}"
+
+    else
+
+        error_msg "GKVM standalone process stopped unexpectedly."
+
+        tail -n 200 "${LOG_FILE}" || true
 
         exit 1
 
@@ -1799,23 +2779,22 @@ else
 
 fi
 
-line
+separator
 
 # ============================================================
-# PORT HEALTH CHECK
+# PORT HEALTH
 # ============================================================
 
-info "Checking GKVM port ${PANEL_PORT}..."
+section "HEALTH CHECK"
 
-PANEL_STATUS='OFFLINE'
+PANEL_STATUS="OFFLINE"
 
-for _ in {1..20}; do
+for _ in {1..30}; do
 
     if ss -ltn 2>/dev/null |
         grep -Eq ":${PANEL_PORT}([[:space:]]|$)"; then
 
-        PANEL_STATUS='ONLINE'
-
+        PANEL_STATUS="ONLINE"
         break
 
     fi
@@ -1826,16 +2805,16 @@ done
 
 if [[ "${PANEL_STATUS}" == "ONLINE" ]]; then
 
-    ok "Port ${PANEL_PORT} is listening."
+    success "TCP port ${PANEL_PORT} is ONLINE."
 
 else
 
-    warn "Port ${PANEL_PORT} is not listening yet."
+    warning "TCP port ${PANEL_PORT} is not listening."
 
 fi
 
 # ============================================================
-# HTTP HEALTH CHECK
+# HTTP HEALTH
 # ============================================================
 
 HTTP_STATUS="$(
@@ -1845,30 +2824,47 @@ HTTP_STATUS="$(
         -w '%{http_code}' \
         --max-time 8 \
         "http://127.0.0.1:${PANEL_PORT}/" \
-        2>/dev/null || true
+        2>/dev/null ||
+        true
 )"
 
 if [[ "${HTTP_STATUS}" =~ ^[0-9]{3}$ ]] &&
    [[ "${HTTP_STATUS}" != "000" ]]; then
 
-    ok "HTTP health check returned ${HTTP_STATUS}."
+    success "HTTP health check : ${HTTP_STATUS}"
 
 else
 
-    warn "HTTP health check did not return a response."
+    warning "HTTP health check did not return a response."
 
 fi
 
 # ============================================================
-# PUBLIC ACCESS
+# DATABASE FINAL CHECK
 # ============================================================
 
-PUBLIC_IP=''
+if [[ -f "${DB_PATH}" ]]; then
 
-if [[ "${CODESPACES:-false}" == "true" ]]; then
+    success "Database is present."
 
-    ACCESS_URL="http://127.0.0.1:${PANEL_PORT}"
-    ACCESS_MODE="GITHUB CODESPACES PORT FORWARDING"
+    detail "${DB_PATH}"
+
+else
+
+    warning "Database file was not found at the recorded path."
+
+fi
+
+# ============================================================
+# ACCESS INFORMATION
+# ============================================================
+
+PUBLIC_IP=""
+
+if [[ "${IS_CODESPACES}" == "true" ]]; then
+
+    ACCESS_URL="http://localhost:${PANEL_PORT}"
+    ACCESS_MODE="CODESPACES PORT FORWARDING"
 
 else
 
@@ -1876,9 +2872,10 @@ else
         curl \
             -4 \
             -fsS \
-            --max-time 10 \
+            --max-time 8 \
             https://api.ipify.org \
-            2>/dev/null || true
+            2>/dev/null ||
+            true
     )"
 
     if [[ -z "${PUBLIC_IP}" ]]; then
@@ -1891,8 +2888,8 @@ else
 
     fi
 
-    [[ -n "${PUBLIC_IP}" ]] \
-        || PUBLIC_IP="YOUR_SERVER_IP"
+    [[ -n "${PUBLIC_IP}" ]] ||
+        PUBLIC_IP="YOUR_SERVER_IP"
 
     ACCESS_URL="http://${PUBLIC_IP}:${PANEL_PORT}"
     ACCESS_MODE="VPS / SERVER"
@@ -1900,16 +2897,14 @@ else
 fi
 
 # ============================================================
-# FINAL PROCESS STATE
+# FINAL CREDENTIAL PROTECTION
 # ============================================================
+
+chmod 600 "${CREDENTIAL_FILE}"
 
 if [[ "${HAS_SYSTEMD}" == "true" ]]; then
 
-    MODE="SYSTEMD"
-
-else
-
-    MODE="STANDALONE"
+    chown root:root "${CREDENTIAL_FILE}"
 
 fi
 
@@ -1919,113 +2914,127 @@ fi
 
 clear 2>/dev/null || true
 
-echo -e "${GREEN}"
+echo
+echo -e "${BRIGHT_CYAN}${BOLD}"
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║                                                              ║"
+echo "║                   ✦ GKVM PANEL READY ✦                      ║"
+echo "║                                                              ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo -e "${RESET}"
 
-cat <<EOF
+echo
+echo -e "${BRIGHT_GREEN}${BOLD}  SYSTEM STATUS${RESET}"
+separator
 
-╔════════════════════════════════════════════════════════════╗
-║                         GKVM PANEL                         ║
-║                    INSTALLATION COMPLETE                   ║
-╚════════════════════════════════════════════════════════════╝
+printf "  %-24s ${BRIGHT_GREEN}%s${RESET}\n" \
+    "Panel" \
+    "${PANEL_STATUS}"
 
-  STATUS              : ${PANEL_STATUS}
-  LICENSE STATUS      : DISABLED
-  MODE                : ${MODE}
+printf "  %-24s ${WHITE}%s${RESET}\n" \
+    "Mode" \
+    "$([[ "${HAS_SYSTEMD}" == "true" ]] && echo "SYSTEMD" || echo "STANDALONE")"
 
-  PANEL URL           : ${ACCESS_URL}
-  ACCESS MODE         : ${ACCESS_MODE}
+printf "  %-24s ${WHITE}%s${RESET}\n" \
+    "Port" \
+    "${PANEL_PORT}"
 
-  INSTALL DIRECTORY   : ${INSTALL_DIR}
-  APPLICATION         : ${APP_DIR}
-  ENTRYPOINT          : ${MAIN_JS}
-  DATA DIRECTORY      : ${DATA_DIR}
-  DATABASE            : ${DB_PATH}
+printf "  %-24s ${WHITE}%s${RESET}\n" \
+    "HTTP" \
+    "${HTTP_STATUS:-NO RESPONSE}"
 
-  CONFIGURATION       : ${ENV_FILE}
-  CREDENTIALS         : ${CREDENTIAL_FILE}
-  LOG FILE            : ${LOG_FILE}
+printf "  %-24s ${WHITE}%s${RESET}\n" \
+    "Database" \
+    "${DB_PATH}"
 
-  SERVICE             : ${SERVICE_NAME}
+printf "  %-24s ${WHITE}%s${RESET}\n" \
+    "Runtime user" \
+    "${RUNTIME_USER}"
 
-──────────────────────────────────────────────────────────────
+echo
+echo -e "${BRIGHT_MAGENTA}${BOLD}  PANEL ACCESS${RESET}"
+separator
 
-  GKVM ADMIN LOGIN
+printf "  %-24s ${BRIGHT_CYAN}%s${RESET}\n" \
+    "URL" \
+    "${ACCESS_URL}"
 
-    Username          : ${ADMIN_USERNAME}
-    Password          : ${ADMIN_PASSWORD}
+printf "  %-24s ${WHITE}%s${RESET}\n" \
+    "Access mode" \
+    "${ACCESS_MODE}"
 
-──────────────────────────────────────────────────────────────
+echo
+echo -e "${BRIGHT_YELLOW}${BOLD}  ADMIN LOGIN${RESET}"
+separator
 
-  MANAGEMENT COMMANDS
+printf "  %-24s ${BRIGHT_WHITE}%s${RESET}\n" \
+    "Username" \
+    "${ADMIN_USERNAME}"
 
-    gkvm start
-    gkvm stop
-    gkvm restart
-    gkvm status
-    gkvm logs
-    sudo gkvm credentials
+printf "  %-24s ${BRIGHT_GREEN}${BOLD}%s${RESET}\n" \
+    "Password" \
+    "${ADMIN_PASSWORD}"
 
-──────────────────────────────────────────────────────────────
+echo
+printf "  %-24s ${WHITE}%s${RESET}\n" \
+    "Credentials file" \
+    "${CREDENTIAL_FILE}"
 
-  VPS SYSTEMD COMMANDS
+echo
+echo -e "${BRIGHT_BLUE}${BOLD}  MANAGEMENT${RESET}"
+separator
 
-    systemctl start ${SERVICE_NAME}
-    systemctl stop ${SERVICE_NAME}
-    systemctl restart ${SERVICE_NAME}
-    systemctl status ${SERVICE_NAME}
-    journalctl -u ${SERVICE_NAME} -f
+echo "    gkvm start"
+echo "    gkvm stop"
+echo "    gkvm restart"
+echo "    gkvm status"
+echo "    gkvm logs"
+echo "    gkvm health"
+echo "    gkvm info"
+echo "    sudo gkvm reset-admin"
+echo "    sudo gkvm credentials"
 
-──────────────────────────────────────────────────────────────
+echo
+echo -e "${BRIGHT_CYAN}${BOLD}  INSTALLATION PATHS${RESET}"
+separator
 
-  CODESPACES
+printf "  %-24s %s\n" \
+    "Application" \
+    "${APP_DIR}"
 
-    Open port ${PANEL_PORT}
-    from the Codespaces PORTS tab.
+printf "  %-24s %s\n" \
+    "Logs" \
+    "${LOG_FILE}"
 
-──────────────────────────────────────────────────────────────
+printf "  %-24s %s\n" \
+    "Backups" \
+    "${BACKUP_DIR}"
 
-  SOURCE REPOSITORY
+printf "  %-24s %s\n" \
+    "Config" \
+    "${ENV_FILE}"
 
-    ${REPO_URL}
+echo
+echo -e "${DIM}License mode: DISABLED (development build)${RESET}"
+echo -e "${DIM}Repository: ${REPO_URL}${RESET}"
 
-  ZIP SOURCE
+echo
+echo -e "${BRIGHT_GREEN}${BOLD}"
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║                    INSTALLATION COMPLETE                     ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo -e "${RESET}"
 
-    ${ZIP_NAME}
+echo
 
-╚════════════════════════════════════════════════════════════╝
+if [[ "${IS_CODESPACES}" == "true" ]]; then
 
-EOF
+    warning "Open port ${PANEL_PORT} from the Codespaces PORTS tab."
 
-echo -e "${NC}"
-
-# ============================================================
-# FINAL STATUS
-# ============================================================
-
-if [[ "${PANEL_STATUS}" == "ONLINE" ]]; then
-
-    ok "GKVM Panel is running on port ${PANEL_PORT}."
-
-else
-
-    warn "GKVM installed, but port ${PANEL_PORT} is not listening."
-
-    echo
-    echo "Check logs with:"
-    echo
-    echo "  gkvm logs"
-    echo
+    detail "The private 10.x container address is not your public panel URL."
 
 fi
 
 echo
-echo "Admin credentials were written to:"
-echo
-echo "  ${CREDENTIAL_FILE}"
-echo
-
-line
-
-echo -e "${CYAN}GKVM Panel installation finished.${NC}"
-
+success "GKVM Panel installation finished successfully."
 echo
