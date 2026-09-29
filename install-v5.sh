@@ -19,7 +19,7 @@ MAGENTA='\e[1;35m'
 WHITE='\e[1;37m'
 NC='\e[0m'
 
-REPO_URL='https://github.com/stripathi02123-tech/Vnm-panel.git'
+REPO_URL='https://github.com/nishant1477/Vnm-panel2.git'
 ZIP_NAME='Vnm-panel.zip'
 
 INSTALL_DIR='/opt/hkvm'
