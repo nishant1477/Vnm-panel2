@@ -41,47 +41,76 @@ NODE_BIN=''
 NPM_BIN=''
 MAIN_JS=''
 
-line(){ echo -e "${MAGENTA}============================================================${NC}"; }
-info(){ echo -e "${CYAN}[VNM PANEL][INFO]${NC} $*"; }
-ok(){ echo -e "${GREEN}[VNM PANEL][OK]${NC} $*"; }
-warn(){ echo -e "${YELLOW}[VNM PANEL][WARNING]${NC} $*"; }
-error(){ echo -e "${RED}[VNM PANEL][ERROR]${NC} $*"; }
-die(){ error "$*"; exit 1; }
+line() {
+  echo -e "${MAGENTA}============================================================${NC}"
+}
 
-cleanup(){
+info() {
+  echo -e "${CYAN}[VNM PANEL][INFO]${NC} $*"
+}
+
+ok() {
+  echo -e "${GREEN}[VNM PANEL][OK]${NC} $*"
+}
+
+warn() {
+  echo -e "${YELLOW}[VNM PANEL][WARNING]${NC} $*"
+}
+
+error() {
+  echo -e "${RED}[VNM PANEL][ERROR]${NC} $*"
+}
+
+die() {
+  error "$*"
+  exit 1
+}
+
+cleanup() {
   if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
     rm -rf "${TMP_DIR}" || true
   fi
 }
+
 trap cleanup EXIT
 
-on_error(){
+on_error() {
   local rc=$?
+
   error "Installer failed at line ${BASH_LINENO[0]} (exit ${rc})."
+
   if [[ -f "${LOG_FILE}" ]]; then
     echo '---------------- VNM PANEL LOG ----------------'
     tail -n 160 "${LOG_FILE}" || true
     echo '-----------------------------------------------'
   fi
+
   exit "${rc}"
 }
+
 trap on_error ERR
 
 clear 2>/dev/null || true
+
 echo -e "${CYAN}"
+
 cat <<'EOF'
 
-██╗  ██╗██╗  ██╗██╗   ██╗███╗   ███╗
-██║ ██╔╝██║ ██╔╝██║   ██║████╗ ████║
-█████╔╝ █████╔╝ ██║   ██║██╔████╔██║
-██╔═██╗ ██╔═██╗ ╚██╗ ██╔╝██║╚██╔╝██║
-██║  ██╗██║  ██╗ ╚████╔╝ ██║ ╚═╝ ██║
-╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝
+██╗   ██╗███╗   ██╗███╗   ███╗
+██║   ██║████╗  ██║████╗ ████║
+██║   ██║██╔██╗ ██║██╔████╔██║
+╚██╗ ██╔╝██║╚██╗██║██║╚██╔╝██║
+ ╚████╔╝ ██║ ╚████║██║ ╚═╝ ██║
+  ╚═══╝  ╚═╝  ╚═══╝╚═╝     ╚═╝
 
-             VNM PANEL V3
-          FRESH ULTRA INSTALLER V5
+                 VNM
+           VNM PANEL V3
+        FRESH ULTRA INSTALLER V5
+
 EOF
+
 echo -e "${NC}"
+
 line
 
 # ============================================================
@@ -90,21 +119,30 @@ line
 
 [[ ${EUID} -eq 0 ]] || die 'Please run this installer as root.'
 [[ -f /etc/os-release ]] || die 'Unable to detect operating system.'
+
+# shellcheck disable=SC1091
 source /etc/os-release
 
 info "Operating System : ${PRETTY_NAME:-unknown}"
 info "Architecture     : $(uname -m)"
 info "Kernel           : $(uname -r)"
 
-[[ "${ID:-}" == 'ubuntu' || "${ID:-}" == 'debian' ]] || die "Unsupported OS: ${ID:-unknown}."
+[[ "${ID:-}" == 'ubuntu' || "${ID:-}" == 'debian' ]] \
+  || die "Unsupported OS: ${ID:-unknown}."
 
-if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+if command -v systemctl >/dev/null 2>&1 &&
+   [[ -d /run/systemd/system ]]; then
+
   HAS_SYSTEMD='true'
   ok 'systemd detected — service mode enabled.'
+
 else
+
   warn 'systemd not detected — standalone/background mode enabled.'
   info 'This is normal in GitHub Codespaces and containers.'
+
 fi
+
 line
 
 # ============================================================
@@ -112,18 +150,31 @@ line
 # ============================================================
 
 export DEBIAN_FRONTEND=noninteractive
+
 info 'Updating package lists...'
 apt-get update -y
 
 info 'Installing base dependencies...'
-apt-get install -y \
-  ca-certificates curl git unzip file lsof procps iproute2 \
-  openssl build-essential python3
 
-# VM runtime packages are useful on a real VM host. Avoid pulling the large
-# QEMU/libvirt stack into Codespaces where /dev/kvm is normally unavailable.
+apt-get install -y \
+  ca-certificates \
+  curl \
+  git \
+  unzip \
+  file \
+  lsof \
+  procps \
+  iproute2 \
+  openssl \
+  build-essential \
+  python3
+
+# VM runtime packages are useful on a real VM host.
+# Avoid the large virtualization stack when systemd is unavailable.
 if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
+
   info 'Installing virtualization dependencies...'
+
   apt-get install -y \
     qemu-system-x86 \
     qemu-utils \
@@ -131,11 +182,15 @@ if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
     cloud-init \
     libvirt-daemon-system \
     libvirt-clients
+
 else
+
   warn 'Skipping libvirt/QEMU host packages because systemd is unavailable.'
+
 fi
 
 ok 'System dependencies installed.'
+
 line
 
 # ============================================================
@@ -145,38 +200,69 @@ line
 NODE_OK='false'
 
 if command -v node >/dev/null 2>&1; then
+
   NODE_VERSION="$(node -v | sed 's/^v//')"
   NODE_MAJOR="${NODE_VERSION%%.*}"
+
   NODE_BIN="$(command -v node)"
-  NODE_BIN="$(readlink -f "${NODE_BIN}" 2>/dev/null || echo "${NODE_BIN}")"
+  NODE_BIN="$(
+    readlink -f "${NODE_BIN}" 2>/dev/null ||
+    echo "${NODE_BIN}"
+  )"
 
   info "Detected Node.js: v${NODE_VERSION}"
 
-  if [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] && (( NODE_MAJOR >= 20 )); then
+  if [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] &&
+     (( NODE_MAJOR >= 20 )); then
+
     NODE_OK='true'
+
   fi
 fi
 
 if [[ "${NODE_OK}" != 'true' ]]; then
+
   info 'Installing Node.js 22...'
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+
+  curl -fsSL \
+    https://deb.nodesource.com/setup_22.x |
+    bash -
+
   apt-get install -y nodejs
 
   NODE_BIN="$(command -v node)"
-  NODE_BIN="$(readlink -f "${NODE_BIN}" 2>/dev/null || echo "${NODE_BIN}")"
+  NODE_BIN="$(
+    readlink -f "${NODE_BIN}" 2>/dev/null ||
+    echo "${NODE_BIN}"
+  )"
+
 fi
 
-command -v node >/dev/null 2>&1 || die 'Node.js installation failed.'
-command -v npm >/dev/null 2>&1 || die 'npm installation failed.'
+command -v node >/dev/null 2>&1 \
+  || die 'Node.js installation failed.'
 
-NODE_BIN="$(readlink -f "$(command -v node)" 2>/dev/null || command -v node)"
-NPM_BIN="$(readlink -f "$(command -v npm)" 2>/dev/null || command -v npm)"
+command -v npm >/dev/null 2>&1 \
+  || die 'npm installation failed.'
 
-[[ -x "${NODE_BIN}" ]] || die "Resolved Node binary is not executable: ${NODE_BIN}"
-[[ -x "${NPM_BIN}" ]] || die "Resolved npm binary is not executable: ${NPM_BIN}"
+NODE_BIN="$(
+  readlink -f "$(command -v node)" 2>/dev/null ||
+  command -v node
+)"
+
+NPM_BIN="$(
+  readlink -f "$(command -v npm)" 2>/dev/null ||
+  command -v npm
+)"
+
+[[ -x "${NODE_BIN}" ]] \
+  || die "Resolved Node binary is not executable: ${NODE_BIN}"
+
+[[ -x "${NPM_BIN}" ]] \
+  || die "Resolved npm binary is not executable: ${NPM_BIN}"
 
 ok "Node.js: $("${NODE_BIN}" -v) | npm: $("${NPM_BIN}" -v)"
 info "Node binary: ${NODE_BIN}"
+
 line
 
 # ============================================================
@@ -205,11 +291,13 @@ touch "${LOG_FILE}"
 chmod 640 "${LOG_FILE}"
 
 if [[ -f "${ENV_FILE}" ]]; then
+
   cp -a \
     "${ENV_FILE}" \
     "${BACKUP_DIR}/hkvm.env.$(date +%Y%m%d-%H%M%S).bak"
 
   ok 'Existing configuration backed up.'
+
 fi
 
 if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
@@ -217,9 +305,11 @@ if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
 fi
 
 if [[ -f "${PID_FILE}" ]]; then
+
   OLD_PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
 
   if [[ "${OLD_PID}" =~ ^[0-9]+$ ]]; then
+
     kill "${OLD_PID}" >/dev/null 2>&1 || true
 
     for _ in {1..20}; do
@@ -228,13 +318,16 @@ if [[ -f "${PID_FILE}" ]]; then
     done
 
     kill -9 "${OLD_PID}" >/dev/null 2>&1 || true
+
   fi
 
   rm -f "${PID_FILE}"
+
 fi
 
 # Clean an old HKVM listener only if it actually belongs to /opt/hkvm/app.
 if command -v lsof >/dev/null 2>&1; then
+
   mapfile -t LISTEN_PIDS < <(
     lsof \
       -t \
@@ -245,6 +338,7 @@ if command -v lsof >/dev/null 2>&1; then
   )
 
   for LPID in "${LISTEN_PIDS[@]:-}"; do
+
     [[ "${LPID}" =~ ^[0-9]+$ ]] || continue
 
     CMD="$(ps -p "${LPID}" -o args= 2>/dev/null || true)"
@@ -253,7 +347,8 @@ if command -v lsof >/dev/null 2>&1; then
     if [[ "${CWD}" == "${APP_DIR}" ]] ||
        [[ "${CMD}" == *"${APP_DIR}/app.js"* ]]; then
 
-      warn "Stopping old VNM Panel listener PID ${LPID} on port ${PANEL_PORT}."
+      warn \
+        "Stopping old VNM Panel listener PID ${LPID} on port ${PANEL_PORT}."
 
       kill "${LPID}" >/dev/null 2>&1 || true
 
@@ -265,12 +360,17 @@ if command -v lsof >/dev/null 2>&1; then
       kill -9 "${LPID}" >/dev/null 2>&1 || true
 
     else
-      die "Port ${PANEL_PORT} is already used by another process (PID ${LPID})."
+
+      die \
+        "Port ${PANEL_PORT} is already used by another process (PID ${LPID})."
+
     fi
+
   done
 fi
 
 ok 'Storage prepared.'
+
 line
 
 # ============================================================
@@ -278,6 +378,7 @@ line
 # ============================================================
 
 TMP_DIR="$(mktemp -d -t vnm-panel-installer-XXXXXX)"
+
 REPO_DIR="${TMP_DIR}/repo"
 EXTRACT_DIR="${TMP_DIR}/extract"
 
@@ -296,6 +397,7 @@ ok 'Repository cloned.'
 ZIP_FILE="${REPO_DIR}/${ZIP_NAME}"
 
 if [[ ! -f "${ZIP_FILE}" ]]; then
+
   ZIP_FILE="$(
     find "${REPO_DIR}" \
       -type f \
@@ -305,6 +407,7 @@ if [[ ! -f "${ZIP_FILE}" ]]; then
       -quit \
       2>/dev/null || true
   )"
+
 fi
 
 [[ -n "${ZIP_FILE}" && -f "${ZIP_FILE}" ]] \
@@ -324,6 +427,7 @@ unzip -q \
   -d "${EXTRACT_DIR}"
 
 ok 'ZIP extracted.'
+
 line
 
 # ============================================================
@@ -349,6 +453,7 @@ if [[ "${#APP_FILES[@]}" -gt 0 ]]; then
 fi
 
 if [[ -z "${SOURCE_APP_DIR}" ]]; then
+
   mapfile -t PACKAGE_FILES < <(
     find "${EXTRACT_DIR}" \
       -type f \
@@ -360,16 +465,19 @@ if [[ -z "${SOURCE_APP_DIR}" ]]; then
   )
 
   for PKG in "${PACKAGE_FILES[@]}"; do
+
     DIR="$(dirname "${PKG}")"
 
-    if node -e \
+    if "${NODE_BIN}" -e \
       'const p=require(process.argv[1]); const m=p.main; process.exit(typeof m==="string"&&m.trim()?0:1)' \
       "${PKG}" \
       >/dev/null 2>&1; then
 
       SOURCE_APP_DIR="${DIR}"
       break
+
     fi
+
   done
 fi
 
@@ -392,6 +500,7 @@ cp -a \
   || die 'Expected VNM Panel app.js was not found after extraction.'
 
 ok "Application installed into ${APP_DIR}."
+
 line
 
 # ============================================================
@@ -408,21 +517,28 @@ info 'Installing Node.js dependencies...'
 if [[ -f package-lock.json ]]; then
 
   if ! "${NPM_BIN}" ci --omit=dev; then
+
     warn 'npm ci failed; retrying with npm install.'
+
     "${NPM_BIN}" install --omit=dev
+
   fi
 
 else
+
   "${NPM_BIN}" install --omit=dev
+
 fi
 
 info 'Rebuilding native modules...'
 
 "${NPM_BIN}" rebuild sqlite3 ssh2 \
   >/dev/null 2>&1 ||
-  warn 'Native module rebuild returned non-zero; runtime validation will catch failures.'
+  warn \
+    'Native module rebuild returned non-zero; runtime validation will catch failures.'
 
 ok 'Node.js dependencies installed.'
+
 line
 
 # ============================================================
@@ -434,18 +550,23 @@ SESSION_SECRET="$(openssl rand -hex 32)"
 [[ -n "${SESSION_SECRET}" ]] \
   || die 'Failed to generate session secret.'
 
-# Generate a shell-safe env file. Values containing spaces MUST be quoted.
+# The application reads VNM_DATA_DIR.
+# Keep HKVM_* compatibility variables as well.
 cat > "${ENV_FILE}" <<EOF
 NODE_ENV=production
 PORT=${PANEL_PORT}
 PANEL_NAME="VNM Panel"
 SESSION_SECRET=${SESSION_SECRET}
+
 LICENSE_MODE=disabled
 LICENSE_KEY=
+
 HKVM_INSTALL_DIR=${INSTALL_DIR}
 HKVM_APP_DIR=${APP_DIR}
 HKVM_DATA_DIR=${DATA_DIR}
 HKVM_LOG_DIR=${LOG_DIR}
+
+VNM_DATA_DIR=${DATA_DIR}
 EOF
 
 chmod 600 "${ENV_FILE}"
@@ -455,13 +576,13 @@ ln -sfn \
   "${ENV_FILE}" \
   "${APP_DIR}/.env"
 
-# Validate generated env before sourcing it later in standalone mode.
 if ! bash -n "${ENV_FILE}"; then
   die "Generated VNM Panel environment file is invalid: ${ENV_FILE}"
 fi
 
 ok 'Configuration created.'
 ok 'License is DISABLED — no license key is required.'
+
 line
 
 # ============================================================
@@ -476,6 +597,7 @@ info "Panel entrypoint: ${MAIN_JS}"
   || die 'Application syntax check failed.'
 
 ok 'Application syntax check passed.'
+
 line
 
 # ============================================================
@@ -585,6 +707,7 @@ PY
   || die 'Application syntax check failed after login compatibility patch.'
 
 ok 'Login compatibility check completed.'
+
 line
 
 # ============================================================
@@ -609,6 +732,7 @@ elif command -v firewall-cmd >/dev/null 2>&1; then
     --reload \
     >/dev/null 2>&1 ||
     true
+
 fi
 
 # ============================================================
@@ -659,9 +783,11 @@ EOF
   sleep 5
 
   if systemctl is-active --quiet "${SERVICE_NAME}"; then
+
     ok 'VNM Panel service is ONLINE.'
 
   else
+
     error 'VNM Panel service failed to start.'
 
     systemctl status \
@@ -677,6 +803,7 @@ EOF
       true
 
     exit 1
+
   fi
 
 else
@@ -701,9 +828,11 @@ else
   sleep 5
 
   if kill -0 "${VNM_PANEL_PID}" >/dev/null 2>&1; then
+
     ok "VNM Panel process is running (PID ${VNM_PANEL_PID})."
 
   else
+
     error 'VNM Panel process exited during startup.'
 
     echo '---------------- VNM PANEL STARTUP LOG ----------------'
@@ -713,6 +842,7 @@ else
     echo '--------------------------------------------------------'
 
     exit 1
+
   fi
 
 fi
@@ -734,9 +864,11 @@ for _ in {1..20}; do
 
     PANEL_STATUS='ONLINE'
     break
+
   fi
 
   sleep 1
+
 done
 
 if [[ "${PANEL_STATUS}" == 'ONLINE' ]]; then
@@ -762,7 +894,9 @@ if [[ "${HTTP_STATUS}" =~ ^[0-9]{3}$ &&
   ok "HTTP health check returned ${HTTP_STATUS}."
 
 else
+
   warn 'HTTP health check did not return a response.'
+
 fi
 
 PUBLIC_IP="$(
@@ -776,22 +910,28 @@ PUBLIC_IP="$(
 )"
 
 if [[ -z "${PUBLIC_IP}" ]]; then
+
   PUBLIC_IP="$(
     hostname -I 2>/dev/null |
       awk '{print $1}' ||
       true
   )"
+
 fi
 
 [[ -n "${PUBLIC_IP}" ]] \
   || PUBLIC_IP='YOUR_SERVER_IP'
 
 if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
+
   PROCESS_STATUS='RUNNING'
   MODE='SYSTEMD'
+
 else
+
   PROCESS_STATUS='RUNNING'
   MODE='STANDALONE'
+
 fi
 
 # ============================================================
@@ -805,8 +945,11 @@ echo -e "${GREEN}"
 cat <<EOF
 
 ╔════════════════════════════════════════════════════════════╗
+║                                                            ║
+║                         VNM                                ║
 ║                    VNM PANEL V3                            ║
 ║                  INSTALLATION COMPLETE                    ║
+║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 
   STATUS              : ${PANEL_STATUS}
@@ -860,10 +1003,17 @@ EOF
 echo -e "${NC}"
 
 if [[ "${PANEL_STATUS}" == 'ONLINE' ]]; then
+
   ok "VNM Panel is running on port ${PANEL_PORT}."
+
 else
-  warn "VNM Panel installed, but port ${PANEL_PORT} is not listening yet."
-  warn "Check: tail -n 240 ${LOG_FILE}"
+
+  warn \
+    "VNM Panel installed, but port ${PANEL_PORT} is not listening yet."
+
+  warn \
+    "Check: tail -n 240 ${LOG_FILE}"
+
 fi
 
 line
