@@ -124,7 +124,13 @@ apt-get install -y \
 # QEMU/libvirt stack into Codespaces where /dev/kvm is normally unavailable.
 if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
   info 'Installing virtualization dependencies...'
-  apt-get install -y qemu-system-x86 qemu-utils ovmf cloud-init libvirt-daemon-system libvirt-clients
+  apt-get install -y \
+    qemu-system-x86 \
+    qemu-utils \
+    ovmf \
+    cloud-init \
+    libvirt-daemon-system \
+    libvirt-clients
 else
   warn 'Skipping libvirt/QEMU host packages because systemd is unavailable.'
 fi
@@ -137,12 +143,15 @@ line
 # ============================================================
 
 NODE_OK='false'
+
 if command -v node >/dev/null 2>&1; then
   NODE_VERSION="$(node -v | sed 's/^v//')"
   NODE_MAJOR="${NODE_VERSION%%.*}"
   NODE_BIN="$(command -v node)"
   NODE_BIN="$(readlink -f "${NODE_BIN}" 2>/dev/null || echo "${NODE_BIN}")"
+
   info "Detected Node.js: v${NODE_VERSION}"
+
   if [[ "${NODE_MAJOR}" =~ ^[0-9]+$ ]] && (( NODE_MAJOR >= 20 )); then
     NODE_OK='true'
   fi
@@ -152,12 +161,14 @@ if [[ "${NODE_OK}" != 'true' ]]; then
   info 'Installing Node.js 22...'
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
+
   NODE_BIN="$(command -v node)"
   NODE_BIN="$(readlink -f "${NODE_BIN}" 2>/dev/null || echo "${NODE_BIN}")"
 fi
 
 command -v node >/dev/null 2>&1 || die 'Node.js installation failed.'
 command -v npm >/dev/null 2>&1 || die 'npm installation failed.'
+
 NODE_BIN="$(readlink -f "$(command -v node)" 2>/dev/null || command -v node)"
 NPM_BIN="$(readlink -f "$(command -v npm)" 2>/dev/null || command -v npm)"
 
@@ -173,14 +184,31 @@ line
 # ============================================================
 
 info "Preparing ${INSTALL_DIR}..."
-mkdir -p "${INSTALL_DIR}" "${DATA_DIR}" "${LOG_DIR}" "${BACKUP_DIR}" "${CONFIG_DIR}"
-chmod 755 "${INSTALL_DIR}" "${DATA_DIR}" "${LOG_DIR}"
-chmod 700 "${BACKUP_DIR}" "${CONFIG_DIR}"
+
+mkdir -p \
+  "${INSTALL_DIR}" \
+  "${DATA_DIR}" \
+  "${LOG_DIR}" \
+  "${BACKUP_DIR}" \
+  "${CONFIG_DIR}"
+
+chmod 755 \
+  "${INSTALL_DIR}" \
+  "${DATA_DIR}" \
+  "${LOG_DIR}"
+
+chmod 700 \
+  "${BACKUP_DIR}" \
+  "${CONFIG_DIR}"
+
 touch "${LOG_FILE}"
 chmod 640 "${LOG_FILE}"
 
 if [[ -f "${ENV_FILE}" ]]; then
-  cp -a "${ENV_FILE}" "${BACKUP_DIR}/hkvm.env.$(date +%Y%m%d-%H%M%S).bak"
+  cp -a \
+    "${ENV_FILE}" \
+    "${BACKUP_DIR}/hkvm.env.$(date +%Y%m%d-%H%M%S).bak"
+
   ok 'Existing configuration backed up.'
 fi
 
@@ -190,32 +218,52 @@ fi
 
 if [[ -f "${PID_FILE}" ]]; then
   OLD_PID="$(cat "${PID_FILE}" 2>/dev/null || true)"
+
   if [[ "${OLD_PID}" =~ ^[0-9]+$ ]]; then
     kill "${OLD_PID}" >/dev/null 2>&1 || true
+
     for _ in {1..20}; do
       kill -0 "${OLD_PID}" >/dev/null 2>&1 || break
       sleep 0.2
     done
+
     kill -9 "${OLD_PID}" >/dev/null 2>&1 || true
   fi
+
   rm -f "${PID_FILE}"
 fi
 
 # Clean an old HKVM listener only if it actually belongs to /opt/hkvm/app.
 if command -v lsof >/dev/null 2>&1; then
-  mapfile -t LISTEN_PIDS < <(lsof -t -nP -iTCP:"${PANEL_PORT}" -sTCP:LISTEN 2>/dev/null || true)
+  mapfile -t LISTEN_PIDS < <(
+    lsof \
+      -t \
+      -nP \
+      -iTCP:"${PANEL_PORT}" \
+      -sTCP:LISTEN \
+      2>/dev/null || true
+  )
+
   for LPID in "${LISTEN_PIDS[@]:-}"; do
     [[ "${LPID}" =~ ^[0-9]+$ ]] || continue
+
     CMD="$(ps -p "${LPID}" -o args= 2>/dev/null || true)"
     CWD="$(readlink -f "/proc/${LPID}/cwd" 2>/dev/null || true)"
-    if [[ "${CWD}" == "${APP_DIR}" ]] || [[ "${CMD}" == *"${APP_DIR}/app.js"* ]]; then
+
+    if [[ "${CWD}" == "${APP_DIR}" ]] ||
+       [[ "${CMD}" == *"${APP_DIR}/app.js"* ]]; then
+
       warn "Stopping old VNM Panel listener PID ${LPID} on port ${PANEL_PORT}."
+
       kill "${LPID}" >/dev/null 2>&1 || true
+
       for _ in {1..20}; do
         kill -0 "${LPID}" >/dev/null 2>&1 || break
         sleep 0.2
       done
+
       kill -9 "${LPID}" >/dev/null 2>&1 || true
+
     else
       die "Port ${PANEL_PORT} is already used by another process (PID ${LPID})."
     fi
@@ -232,24 +280,49 @@ line
 TMP_DIR="$(mktemp -d -t vnm-panel-installer-XXXXXX)"
 REPO_DIR="${TMP_DIR}/repo"
 EXTRACT_DIR="${TMP_DIR}/extract"
+
 mkdir -p "${EXTRACT_DIR}"
 
 info 'Cloning VNM Panel repository...'
-git clone --depth 1 --single-branch "${REPO_URL}" "${REPO_DIR}"
+
+git clone \
+  --depth 1 \
+  --single-branch \
+  "${REPO_URL}" \
+  "${REPO_DIR}"
+
 ok 'Repository cloned.'
 
 ZIP_FILE="${REPO_DIR}/${ZIP_NAME}"
+
 if [[ ! -f "${ZIP_FILE}" ]]; then
-  ZIP_FILE="$(find "${REPO_DIR}" -type f -name "${ZIP_NAME}" -not -path '*/.git/*' -print -quit 2>/dev/null || true)"
+  ZIP_FILE="$(
+    find "${REPO_DIR}" \
+      -type f \
+      -name "${ZIP_NAME}" \
+      -not -path '*/.git/*' \
+      -print \
+      -quit \
+      2>/dev/null || true
+  )"
 fi
-[[ -n "${ZIP_FILE}" && -f "${ZIP_FILE}" ]] || die "${ZIP_NAME} was not found in the repository."
+
+[[ -n "${ZIP_FILE}" && -f "${ZIP_FILE}" ]] \
+  || die "${ZIP_NAME} was not found in the repository."
 
 ZIP_SIZE_MB="$(du -m "${ZIP_FILE}" | awk '{print $1}')"
+
 info "Found ${ZIP_NAME}: ${ZIP_SIZE_MB} MB"
-(( ZIP_SIZE_MB >= 1 )) || die 'ZIP is empty or invalid.'
+
+(( ZIP_SIZE_MB >= 1 )) \
+  || die 'ZIP is empty or invalid.'
 
 info 'Extracting application...'
-unzip -q "${ZIP_FILE}" -d "${EXTRACT_DIR}"
+
+unzip -q \
+  "${ZIP_FILE}" \
+  -d "${EXTRACT_DIR}"
+
 ok 'ZIP extracted.'
 line
 
@@ -260,41 +333,63 @@ line
 info 'Detecting real VNM Panel application root...'
 
 mapfile -t APP_FILES < <(
-  find "${EXTRACT_DIR}" -type f -name app.js \
-    -not -path '*/node_modules/*' -not -path '*/.git/*' \
-    -print | sort
+  find "${EXTRACT_DIR}" \
+    -type f \
+    -name app.js \
+    -not -path '*/node_modules/*' \
+    -not -path '*/.git/*' \
+    -print |
+    sort
 )
 
 SOURCE_APP_DIR=''
+
 if [[ "${#APP_FILES[@]}" -gt 0 ]]; then
   SOURCE_APP_DIR="$(dirname "${APP_FILES[0]}")"
 fi
 
 if [[ -z "${SOURCE_APP_DIR}" ]]; then
   mapfile -t PACKAGE_FILES < <(
-    find "${EXTRACT_DIR}" -type f -name package.json \
-      -not -path '*/node_modules/*' -not -path '*/.git/*' \
-      -print | sort
+    find "${EXTRACT_DIR}" \
+      -type f \
+      -name package.json \
+      -not -path '*/node_modules/*' \
+      -not -path '*/.git/*' \
+      -print |
+      sort
   )
+
   for PKG in "${PACKAGE_FILES[@]}"; do
     DIR="$(dirname "${PKG}")"
-    if node -e 'const p=require(process.argv[1]); const m=p.main; process.exit(typeof m==="string"&&m.trim()?0:1)' "${PKG}" >/dev/null 2>&1; then
+
+    if node -e \
+      'const p=require(process.argv[1]); const m=p.main; process.exit(typeof m==="string"&&m.trim()?0:1)' \
+      "${PKG}" \
+      >/dev/null 2>&1; then
+
       SOURCE_APP_DIR="${DIR}"
       break
     fi
   done
 fi
 
-[[ -n "${SOURCE_APP_DIR}" ]] || die 'Unable to locate the real VNM Panel application root.'
-[[ "${SOURCE_APP_DIR}" != *'/node_modules/'* ]] || die 'Safety failure: application root is inside node_modules.'
+[[ -n "${SOURCE_APP_DIR}" ]] \
+  || die 'Unable to locate the real VNM Panel application root.'
+
+[[ "${SOURCE_APP_DIR}" != *'/node_modules/'* ]] \
+  || die 'Safety failure: application root is inside node_modules.'
 
 info "Application root: ${SOURCE_APP_DIR}"
 
 rm -rf "${APP_DIR}"
 mkdir -p "${APP_DIR}"
-cp -a "${SOURCE_APP_DIR}/." "${APP_DIR}/"
 
-[[ -f "${APP_DIR}/app.js" ]] || die 'Expected VNM Panel app.js was not found after extraction.'
+cp -a \
+  "${SOURCE_APP_DIR}/." \
+  "${APP_DIR}/"
+
+[[ -f "${APP_DIR}/app.js" ]] \
+  || die 'Expected VNM Panel app.js was not found after extraction.'
 
 ok "Application installed into ${APP_DIR}."
 line
@@ -304,20 +399,28 @@ line
 # ============================================================
 
 cd "${APP_DIR}"
-[[ -f package.json ]] || die 'package.json missing from application.'
+
+[[ -f package.json ]] \
+  || die 'package.json missing from application.'
 
 info 'Installing Node.js dependencies...'
+
 if [[ -f package-lock.json ]]; then
+
   if ! "${NPM_BIN}" ci --omit=dev; then
     warn 'npm ci failed; retrying with npm install.'
     "${NPM_BIN}" install --omit=dev
   fi
+
 else
   "${NPM_BIN}" install --omit=dev
 fi
 
 info 'Rebuilding native modules...'
-"${NPM_BIN}" rebuild sqlite3 ssh2 >/dev/null 2>&1 || warn 'Native module rebuild returned non-zero; runtime validation will catch failures.'
+
+"${NPM_BIN}" rebuild sqlite3 ssh2 \
+  >/dev/null 2>&1 ||
+  warn 'Native module rebuild returned non-zero; runtime validation will catch failures.'
 
 ok 'Node.js dependencies installed.'
 line
@@ -327,7 +430,9 @@ line
 # ============================================================
 
 SESSION_SECRET="$(openssl rand -hex 32)"
-[[ -n "${SESSION_SECRET}" ]] || die 'Failed to generate session secret.'
+
+[[ -n "${SESSION_SECRET}" ]] \
+  || die 'Failed to generate session secret.'
 
 # Generate a shell-safe env file. Values containing spaces MUST be quoted.
 cat > "${ENV_FILE}" <<EOF
@@ -345,9 +450,12 @@ EOF
 
 chmod 600 "${ENV_FILE}"
 chown root:root "${ENV_FILE}"
-ln -sfn "${ENV_FILE}" "${APP_DIR}/.env"
 
-# Validate the generated env before sourcing it later in standalone mode.
+ln -sfn \
+  "${ENV_FILE}" \
+  "${APP_DIR}/.env"
+
+# Validate generated env before sourcing it later in standalone mode.
 if ! bash -n "${ENV_FILE}"; then
   die "Generated VNM Panel environment file is invalid: ${ENV_FILE}"
 fi
@@ -363,7 +471,10 @@ line
 MAIN_JS="${APP_DIR}/app.js"
 
 info "Panel entrypoint: ${MAIN_JS}"
-"${NODE_BIN}" --check "${MAIN_JS}" || die 'Application syntax check failed.'
+
+"${NODE_BIN}" --check "${MAIN_JS}" \
+  || die 'Application syntax check failed.'
+
 ok 'Application syntax check passed.'
 line
 
@@ -373,58 +484,106 @@ line
 
 info 'Checking login/CSRF compatibility...'
 
-cp -a "${MAIN_JS}" "${BACKUP_DIR}/app.js.preinstall.$(date +%Y%m%d-%H%M%S).bak"
+cp -a \
+  "${MAIN_JS}" \
+  "${BACKUP_DIR}/app.js.preinstall.$(date +%Y%m%d-%H%M%S).bak"
 
 python3 - "${MAIN_JS}" <<'PY'
 from pathlib import Path
-import re, sys
+import re
+import sys
 
 p = Path(sys.argv[1])
 s = p.read_text(encoding='utf-8')
-pattern = re.compile(r'function\s+csrfProtection\s*\(\s*req\s*,\s*res\s*,\s*next\s*\)\s*\{', re.S)
+
+pattern = re.compile(
+    r'function\s+csrfProtection\s*\(\s*req\s*,\s*res\s*,\s*next\s*\)\s*\{',
+    re.S
+)
+
 m = pattern.search(s)
 
 if m:
     brace = s.find('{', m.start())
     depth = 0
     end = None
+
     for i in range(brace, len(s)):
         ch = s[i]
+
         if ch == '{':
             depth += 1
+
         elif ch == '}':
             depth -= 1
+
             if depth == 0:
                 end = i + 1
                 break
+
     if end is None:
         raise SystemExit('Could not safely parse csrfProtection')
 
     new = '''function csrfProtection(req, res, next) {
   const mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
-  const requestPath = (req.originalUrl || req.url || req.path || '/').split('?')[0].replace(/\\/+$/, '') || '/';
-  const isLogin = requestPath === '/login' || requestPath === '/api/login';
 
-  if (!mutating || isLogin || requestPath.startsWith('/api/auth/')) {
+  const requestPath = (
+    req.originalUrl ||
+    req.url ||
+    req.path ||
+    '/'
+  )
+    .split('?')[0]
+    .replace(/\\/+$/, '') || '/';
+
+  const isLogin =
+    requestPath === '/login' ||
+    requestPath === '/api/login';
+
+  if (
+    !mutating ||
+    isLogin ||
+    requestPath.startsWith('/api/auth/')
+  ) {
     return next();
   }
 
   const headerToken = req.get('x-csrf-token');
-  if (!headerToken || headerToken !== req.session.csrfToken) {
-    console.warn(`[CSRF] Rejected ${req.method} ${requestPath} (bad/missing token) from ${req.ip}`);
-    return res.status(403).json({ error: 'Invalid or missing CSRF token' });
+
+  if (
+    !headerToken ||
+    headerToken !== req.session.csrfToken
+  ) {
+    console.warn(
+      `[CSRF] Rejected ${req.method} ${requestPath} (bad/missing token) from ${req.ip}`
+    );
+
+    return res
+      .status(403)
+      .json({
+        error: 'Invalid or missing CSRF token'
+      });
   }
 
   next();
 }'''
+
     s = s[:m.start()] + new + s[end:]
-    p.write_text(s, encoding='utf-8')
+
+    p.write_text(
+        s,
+        encoding='utf-8'
+    )
+
     print('PATCHED_CSRF_FUNCTION')
+
 else:
     print('NO_NAMED_CSRF_FUNCTION')
 PY
 
-"${NODE_BIN}" --check "${MAIN_JS}" || die 'Application syntax check failed after login compatibility patch.'
+"${NODE_BIN}" --check "${MAIN_JS}" \
+  || die 'Application syntax check failed after login compatibility patch.'
+
 ok 'Login compatibility check completed.'
 line
 
@@ -433,10 +592,23 @@ line
 # ============================================================
 
 if command -v ufw >/dev/null 2>&1; then
-  ufw allow "${PANEL_PORT}/tcp" >/dev/null 2>&1 || true
+
+  ufw allow "${PANEL_PORT}/tcp" \
+    >/dev/null 2>&1 ||
+    true
+
 elif command -v firewall-cmd >/dev/null 2>&1; then
-  firewall-cmd --permanent --add-port="${PANEL_PORT}/tcp" >/dev/null 2>&1 || true
-  firewall-cmd --reload >/dev/null 2>&1 || true
+
+  firewall-cmd \
+    --permanent \
+    --add-port="${PANEL_PORT}/tcp" \
+    >/dev/null 2>&1 ||
+    true
+
+  firewall-cmd \
+    --reload \
+    >/dev/null 2>&1 ||
+    true
 fi
 
 # ============================================================
@@ -444,7 +616,9 @@ fi
 # ============================================================
 
 if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
+
   info 'Creating systemd service...'
+
   cat > "${SERVICE_FILE}" <<EOF
 [Unit]
 Description=VNM Panel V3
@@ -469,44 +643,78 @@ WantedBy=multi-user.target
 EOF
 
   chmod 644 "${SERVICE_FILE}"
-  systemd-analyze verify "${SERVICE_FILE}" || die 'systemd service validation failed.'
+
+  systemd-analyze verify "${SERVICE_FILE}" \
+    || die 'systemd service validation failed.'
+
   systemctl daemon-reload
-  systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1
+
+  systemctl enable "${SERVICE_NAME}" \
+    >/dev/null 2>&1
+
   : > "${LOG_FILE}"
+
   systemctl restart "${SERVICE_NAME}"
+
   sleep 5
 
   if systemctl is-active --quiet "${SERVICE_NAME}"; then
     ok 'VNM Panel service is ONLINE.'
+
   else
     error 'VNM Panel service failed to start.'
-    systemctl status "${SERVICE_NAME}" --no-pager --full || true
-    journalctl -u "${SERVICE_NAME}" -n 200 --no-pager || true
+
+    systemctl status \
+      "${SERVICE_NAME}" \
+      --no-pager \
+      --full ||
+      true
+
+    journalctl \
+      -u "${SERVICE_NAME}" \
+      -n 200 \
+      --no-pager ||
+      true
+
     exit 1
   fi
+
 else
+
   info 'Starting VNM Panel in standalone/background mode...'
+
   : > "${LOG_FILE}"
 
   set -a
   source "${ENV_FILE}"
   set +a
 
-  nohup "${NODE_BIN}" "${MAIN_JS}" >>"${LOG_FILE}" 2>&1 &
+  nohup \
+    "${NODE_BIN}" \
+    "${MAIN_JS}" \
+    >>"${LOG_FILE}" 2>&1 &
+
   VNM_PANEL_PID=$!
+
   echo "${VNM_PANEL_PID}" > "${PID_FILE}"
 
   sleep 5
 
   if kill -0 "${VNM_PANEL_PID}" >/dev/null 2>&1; then
     ok "VNM Panel process is running (PID ${VNM_PANEL_PID})."
+
   else
     error 'VNM Panel process exited during startup.'
+
     echo '---------------- VNM PANEL STARTUP LOG ----------------'
+
     tail -n 240 "${LOG_FILE}" || true
+
     echo '--------------------------------------------------------'
+
     exit 1
   fi
+
 fi
 
 line
@@ -516,13 +724,18 @@ line
 # ============================================================
 
 info "Checking panel port ${PANEL_PORT}..."
+
 PANEL_STATUS='OFFLINE'
 
 for _ in {1..20}; do
-  if ss -ltn 2>/dev/null | grep -Eq ":${PANEL_PORT}([[:space:]]|$)"; then
+
+  if ss -ltn 2>/dev/null |
+    grep -Eq ":${PANEL_PORT}([[:space:]]|$)"; then
+
     PANEL_STATUS='ONLINE'
     break
   fi
+
   sleep 1
 done
 
@@ -532,19 +745,46 @@ else
   warn "Port ${PANEL_PORT} is not listening."
 fi
 
-HTTP_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || true)"
+HTTP_STATUS="$(
+  curl \
+    -sS \
+    -o /dev/null \
+    -w '%{http_code}' \
+    --max-time 8 \
+    "http://127.0.0.1:${PANEL_PORT}/" \
+    2>/dev/null ||
+    true
+)"
 
-if [[ "${HTTP_STATUS}" =~ ^[0-9]{3}$ && "${HTTP_STATUS}" != '000' ]]; then
+if [[ "${HTTP_STATUS}" =~ ^[0-9]{3}$ &&
+      "${HTTP_STATUS}" != '000' ]]; then
+
   ok "HTTP health check returned ${HTTP_STATUS}."
+
 else
   warn 'HTTP health check did not return a response.'
 fi
 
-PUBLIC_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+PUBLIC_IP="$(
+  curl \
+    -4 \
+    -fsS \
+    --max-time 10 \
+    https://api.ipify.org \
+    2>/dev/null ||
+    true
+)"
+
 if [[ -z "${PUBLIC_IP}" ]]; then
-  PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  PUBLIC_IP="$(
+    hostname -I 2>/dev/null |
+      awk '{print $1}' ||
+      true
+  )"
 fi
-[[ -n "${PUBLIC_IP}" ]] || PUBLIC_IP='YOUR_SERVER_IP'
+
+[[ -n "${PUBLIC_IP}" ]] \
+  || PUBLIC_IP='YOUR_SERVER_IP'
 
 if [[ "${HAS_SYSTEMD}" == 'true' ]]; then
   PROCESS_STATUS='RUNNING'
@@ -559,7 +799,9 @@ fi
 # ============================================================
 
 clear 2>/dev/null || true
+
 echo -e "${GREEN}"
+
 cat <<EOF
 
 ╔════════════════════════════════════════════════════════════╗
@@ -612,7 +854,9 @@ cat <<EOF
     DISABLED — no key is required for this development build.
 
 ╚════════════════════════════════════════════════════════════╝
+
 EOF
+
 echo -e "${NC}"
 
 if [[ "${PANEL_STATUS}" == 'ONLINE' ]]; then
@@ -623,4 +867,5 @@ else
 fi
 
 line
+
 echo -e "${CYAN}VNM Panel V5 installation finished.${NC}"
