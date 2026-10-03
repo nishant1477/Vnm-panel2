@@ -1,8 +1,8 @@
-
+#!/usr/bin/env bash
 set -Eeuo pipefail
 
 # ============================================================
-# VNM PANEL V3 — FRESH ULTRA INSTALLER V6
+# VNM PANEL V3 — FRESH ULTRA INSTALLER V7
 # GitHub ZIP -> verify -> detect RDP build -> install -> run
 # ============================================================
 
@@ -72,7 +72,7 @@ cat <<'BANNER'
 
                  VNM
            VNM PANEL V3
-        FRESH ULTRA INSTALLER V6
+        FRESH ULTRA INSTALLER V7
 
 BANNER
 echo -e "${NC}"
@@ -255,14 +255,40 @@ REPO_DIR="${TMP_DIR}/repo"
 EXTRACT_DIR="${TMP_DIR}/extract"
 mkdir -p "${EXTRACT_DIR}"
 
-info 'Cloning VNM Panel repository...'
+info 'Cloning VNM Panel repository directly (no core-installer wrapper)...'
 git clone --depth 1 --single-branch "${REPO_URL}" "${REPO_DIR}"
 ok 'Repository cloned.'
+
+# The repository may contain ZIP names with different capitalization.
+# Never require one exact filename and never download/execute a second installer.
+mapfile -t AVAILABLE_ZIPS < <(find "${REPO_DIR}" -maxdepth 1 -type f -iname '*.zip' -printf '%f\n' 2>/dev/null | sort)
+if ((${#AVAILABLE_ZIPS[@]} == 0)); then
+  die 'No ZIP archive was found in the VNM Panel repository.'
+fi
+info "ZIP archives found: ${AVAILABLE_ZIPS[*]}"
 
 SELECTED_BUILD_ROOT=''
 SELECTED_ZIP_NAME=''
 
-for CANDIDATE in "${ZIP_CANDIDATES[@]}"; do
+# Prefer the known VNM names, case-insensitively, then fall back to any ZIP.
+ZIP_CANDIDATES_DYNAMIC=()
+for preferred in 'VNM-Panel.zip' 'Vnm-Panel.zip' 'Vnm-panel.zip'; do
+  while IFS= read -r actual; do
+    [[ -n "$actual" ]] || continue
+    if [[ "${actual,,}" == "${preferred,,}" ]]; then
+      ZIP_CANDIDATES_DYNAMIC+=("$actual")
+    fi
+  done < <(printf '%s\n' "${AVAILABLE_ZIPS[@]}")
+done
+for actual in "${AVAILABLE_ZIPS[@]}"; do
+  duplicate='false'
+  for picked in "${ZIP_CANDIDATES_DYNAMIC[@]:-}"; do
+    [[ "${picked}" == "${actual}" ]] && duplicate='true' && break
+  done
+  [[ "${duplicate}" == 'false' ]] && ZIP_CANDIDATES_DYNAMIC+=("${actual}")
+done
+
+for CANDIDATE in "${ZIP_CANDIDATES_DYNAMIC[@]}"; do
   CANDIDATE_PATH="${REPO_DIR}/${CANDIDATE}"
   [[ -f "${CANDIDATE_PATH}" ]] || continue
 
@@ -275,35 +301,27 @@ for CANDIDATE in "${ZIP_CANDIDATES[@]}"; do
     continue
   fi
 
-  TEST_DIR="${TMP_DIR}/test-${#CANDIDATE}"
+  TEST_DIR="${TMP_DIR}/test-${RANDOM}-${RANDOM}"
   rm -rf "${TEST_DIR}"; mkdir -p "${TEST_DIR}"
   if ! unzip -q "${CANDIDATE_PATH}" -d "${TEST_DIR}"; then
     warn "Could not extract ${CANDIDATE}; skipping."
     rm -rf "${TEST_DIR}"; continue
   fi
 
-  if [[ -z "${SELECTED_BUILD_ROOT}" ]] && has_rdp_code "${TEST_DIR}"; then
+  if has_rdp_code "${TEST_DIR}"; then
     SELECTED_BUILD_ROOT="${TEST_DIR}"
     SELECTED_ZIP_NAME="${CANDIDATE}"
     ZIP_FILE="${CANDIDATE_PATH}"
     info "RDP-enabled build detected in ${CANDIDATE}."
     break
   fi
+
+  rm -rf "${TEST_DIR}"
 done
 
 if [[ -z "${ZIP_FILE}" ]]; then
-  for CANDIDATE in "${ZIP_CANDIDATES[@]}"; do
-    CANDIDATE_PATH="${REPO_DIR}/${CANDIDATE}"
-    [[ -f "${CANDIDATE_PATH}" ]] || continue
-    if unzip -tq "${CANDIDATE_PATH}" >/dev/null 2>&1; then
-      ZIP_FILE="${CANDIDATE_PATH}"
-      SELECTED_ZIP_NAME="${CANDIDATE}"
-      break
-    fi
-  done
+  die 'No valid RDP-enabled VNM Panel ZIP archive was found in the repository.'
 fi
-
-[[ -n "${ZIP_FILE}" && -f "${ZIP_FILE}" ]] || die 'No valid VNM Panel ZIP archive was found in the repository.'
 
 ZIP_SIZE_BYTES="$(stat -c '%s' "${ZIP_FILE}")"
 ZIP_SHA256="$(sha256sum "${ZIP_FILE}" | awk '{print $1}')"
@@ -311,15 +329,17 @@ info "Selected ZIP : ${SELECTED_ZIP_NAME}"
 info "ZIP size     : ${ZIP_SIZE_BYTES} bytes"
 info "ZIP SHA-256  : ${ZIP_SHA256}"
 
-rm -rf "${EXTRACT_DIR}"; mkdir -p "${EXTRACT_DIR}"
-info 'Extracting selected application...'
+rm -rf "${EXTRACT_DIR}"
+mkdir -p "${EXTRACT_DIR}"
+info 'Extracting selected RDP-enabled application...'
 unzip -q "${ZIP_FILE}" -d "${EXTRACT_DIR}"
-ok 'ZIP extracted.'
+ok 'Selected ZIP extracted.'
 
 if has_rdp_code "${EXTRACT_DIR}"; then
-  RDP_SOURCE_STATUS='DETECTED'; ok 'RDP code detected in selected ZIP.'
+  RDP_SOURCE_STATUS='DETECTED'
+  ok 'RDP code detected in selected ZIP.'
 else
-  RDP_SOURCE_STATUS='NOT_DETECTED'; warn 'RDP code was not detected in selected ZIP.'
+  die 'Safety check failed: selected ZIP does not contain the RDP feature.'
 fi
 line
 
@@ -404,6 +424,24 @@ if has_rdp_code "${APP_DIR}"; then
 else
   RDP_INSTALL_STATUS='NOT_DETECTED'; warn 'RDP feature was not detected in installed application.'
 fi
+line
+
+if [[ "${RDP_INSTALL_STATUS}" != 'DETECTED' ]]; then
+  die 'Safety check failed: selected application does not contain the RDP feature.'
+fi
+
+cat > "${BUILD_INFO_FILE}" <<BUILD_INFO_EOF
+INSTALLER_VERSION=V7
+REPOSITORY=${REPO_URL}
+ZIP_NAME=${SELECTED_ZIP_NAME}
+ZIP_SIZE_BYTES=${ZIP_SIZE_BYTES}
+ZIP_SHA256=${ZIP_SHA256}
+RDP_SOURCE_STATUS=${RDP_SOURCE_STATUS}
+RDP_INSTALL_STATUS=${RDP_INSTALL_STATUS}
+APP_DIR=${APP_DIR}
+BUILD_INFO_EOF
+chmod 600 "${BUILD_INFO_FILE}"
+ok "Build information saved to ${BUILD_INFO_FILE}."
 line
 
 # ============================================================
